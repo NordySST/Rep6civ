@@ -246,6 +246,7 @@ export const T = {
   handoffTitle: 'Próximo jogador',
   handoffText: (turn: number) => `Turno ${turn}. Passe o aparelho para este jogador e toque em Começar.`,
   startTurn: 'Começar a vez',
+  inboxTitle: 'Enquanto você aguardava',
   eraMsg: (era: string) => `Sua civilização entrou na ${era}!`,
   scoreboard: 'Placar e vitórias',
   gotIt: 'Entendi',
