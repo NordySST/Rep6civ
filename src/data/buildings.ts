@@ -36,6 +36,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   granary: {
     id: 'granary',
+    requiresTech: 'pottery',
     name: 'Celeiro',
     cost: 65,
     yields: { food: 1 },
@@ -44,6 +45,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   watermill: {
     id: 'watermill',
+    requiresTech: 'wheel',
     name: 'Moinho d’Água',
     cost: 80,
     yields: { food: 1, production: 1 },
@@ -52,6 +54,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   workshop: {
     id: 'workshop',
+    requiresTech: 'engineering',
     name: 'Oficina',
     cost: 90,
     yields: { production: 2 },
@@ -59,6 +62,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   shrine: {
     id: 'shrine',
+    requiresTech: 'astrology',
     name: 'Santuário',
     cost: 70,
     yields: { faith: 2 },
@@ -66,6 +70,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   library: {
     id: 'library',
+    requiresTech: 'writing',
     name: 'Biblioteca',
     cost: 90,
     yields: { science: 2 },
@@ -73,6 +78,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   market: {
     id: 'market',
+    requiresTech: 'currency',
     name: 'Mercado',
     cost: 100,
     yields: { gold: 3 },
@@ -80,6 +86,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   lighthouse: {
     id: 'lighthouse',
+    requiresTech: 'sailing',
     name: 'Farol',
     cost: 80,
     yields: { food: 1, gold: 1 },

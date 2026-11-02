@@ -3,7 +3,8 @@ import { RESOURCE_BY_ID } from '../data/resources';
 import { UNITS } from '../data/units';
 import type { GameState, Tile, Unit } from '../state/types';
 import { assignCitizens } from './cities';
-import { isPassableLand } from './tiles';
+import { TECH_BY_ID } from '../data/techs';
+import { isPassableLand, visibleResource } from './tiles';
 
 /**
  * Construtores: melhorias, estradas e remoção de características.
@@ -12,11 +13,12 @@ import { isPassableLand } from './tiles';
  */
 
 /** A melhoria pode existir neste hexágono (ignorando dono/unidade)? */
-export function improvementFits(t: Tile, id: ImprovementId): boolean {
+export function improvementFits(t: Tile, id: ImprovementId, techs?: readonly string[]): boolean {
   const def = IMPROVEMENTS[id];
   if (!isPassableLand(t) || t.wonder) return false;
-  if (t.resource) {
-    const r = RESOURCE_BY_ID[t.resource];
+  const res = visibleResource(t, techs);
+  if (res) {
+    const r = RESOURCE_BY_ID[res];
     if (r?.improvement) {
       if (r.improvement !== id) return false;
       return !t.feature || !!def.features?.includes(t.feature);
@@ -49,7 +51,10 @@ export function canBuildImprovement(state: GameState, u: Unit, id: ImprovementId
   if ((u.charges ?? 0) <= 0) return { ok: false, reason: 'Sem cargas.' };
   const t = state.map.tiles[u.pos];
   if (t.improvement === id) return { ok: false, reason: 'Já existe esta melhoria.' };
-  if (!improvementFits(t, id)) return { ok: false, reason: 'Melhoria inválida para este hexágono.' };
+  const techs = state.players[u.owner]?.techs ?? [];
+  if (!improvementFits(t, id, techs)) return { ok: false, reason: 'Melhoria inválida para este hexágono.' };
+  const req = IMPROVEMENTS[id].requiresTech;
+  if (req && !techs.includes(req)) return { ok: false, reason: `Exige ${TECH_BY_ID[req]?.name ?? req}.` };
   return { ok: true };
 }
 
@@ -114,7 +119,7 @@ export function removeFeature(state: GameState, u: Unit): BuildCheck & { product
   const rem = FEATURE_REMOVAL[t.feature!]!;
   delete t.feature;
   // melhorias que dependiam da característica deixam de ser válidas
-  if (t.improvement && !improvementFits(t, t.improvement as ImprovementId)) delete t.improvement;
+  if (t.improvement && !improvementFits(t, t.improvement as ImprovementId, state.players[u.owner]?.techs)) delete t.improvement;
   const city = state.cities.find((c) => c.id === t.cityId);
   if (city && rem.production > 0) {
     const item = city.queue[0];

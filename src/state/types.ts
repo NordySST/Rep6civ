@@ -88,9 +88,24 @@ export interface Player {
   /** Quantas cidades já foram fundadas (para escolher o próximo nome). */
   citiesFounded: number;
   gold: number;
+  /** Ciência ainda não aplicada a uma pesquisa (flui para a pesquisa atual). */
   science: number;
+  /** Cultura ainda não aplicada a uma cívica. */
   culture: number;
   faith: number;
+  techs: string[];
+  researching: string | null;
+  techProgress: Record<string, number>;
+  civics: string[];
+  researchingCivic: string | null;
+  civicProgress: Record<string, number>;
+  /** Tecnologias/cívicas com eureca/inspiração obtida. */
+  boosts: string[];
+  government: string | null;
+  /** Política em cada espaço do governo (ordem: militares, econômicos, coringas). */
+  policies: (string | null)[];
+  /** Troca gratuita de governo/políticas disponível neste turno. */
+  policyChangeAvailable: boolean;
 }
 
 export interface GameSettings {

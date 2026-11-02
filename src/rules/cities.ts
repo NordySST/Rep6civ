@@ -1,9 +1,12 @@
 import { BUILDINGS, type BuildingDef } from '../data/buildings';
+import { TECH_BY_ID } from '../data/techs';
 import { UNITS, type UnitDef } from '../data/units';
 import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/types';
 import { distance, neighbors, tilesInRadius } from './hex';
-import { isPassableLand, isWater, tileYields } from './tiles';
+import { modifiersFor } from './effects';
+import { isPassableLand, isWater, tileYields as rawTileYields, visibleResource } from './tiles';
+import type { Tile } from '../state/types';
 
 /**
  * Gestão de cidades: rendimentos, cidadãos, crescimento, moradia, produção,
@@ -27,10 +30,24 @@ export const FOCUS_LABELS: Record<CityFocus, string> = {
 
 // ------------------------------------------------------------------ rendimentos
 
+/** Tecnologias do dono da cidade (para recursos revelados). */
+function ownerTechs(state: GameState, city: City): readonly string[] {
+  return state.players[city.owner]?.techs ?? [];
+}
+
+/** Rendimento de um hexágono do ponto de vista do dono da cidade. */
+export function cityTileYields(state: GameState, city: City, t: Tile): Yields {
+  return rawTileYields(t, ownerTechs(state, city));
+}
+
+function visibleResourceFor(state: GameState, city: City, t: Tile): string | undefined {
+  return visibleResource(t, ownerTechs(state, city));
+}
+
 /** Rendimento do centro da cidade: mínimo de 2 comida e 1 produção. */
 export function cityCenterYields(state: GameState, city: City): Yields {
   const t = state.map.tiles[city.pos];
-  const y = tileYields({ ...t, feature: undefined, improvement: undefined });
+  const y = rawTileYields({ ...t, feature: undefined, improvement: undefined }, ownerTechs(state, city));
   y.food = Math.max(y.food, 2);
   y.production = Math.max(y.production, 1);
   return y;
@@ -42,11 +59,29 @@ export function buildingYields(city: City): Yields {
   return y;
 }
 
-/** Rendimento bruto por turno (centro + hexágonos trabalhados + edifícios). */
+/** Ciência e cultura geradas pelos cidadãos: +1 ciência a cada 2 e +1 cultura a cada 3. */
+export function citizenYields(city: City): Yields {
+  const y = emptyYields();
+  y.science = Math.floor(city.population / 2);
+  y.culture = Math.floor(city.population / 3);
+  return y;
+}
+
+/**
+ * Rendimento por turno: centro + hexágonos trabalhados + edifícios + cidadãos +
+ * governo/políticas (bônus fixos, depois percentuais arredondados para baixo).
+ */
 export function cityYields(state: GameState, city: City): Yields {
   const y = cityCenterYields(state, city);
-  for (const i of city.worked) addYields(y, tileYields(state.map.tiles[i]));
+  for (const i of city.worked) addYields(y, cityTileYields(state, city, state.map.tiles[i]));
   addYields(y, buildingYields(city));
+  addYields(y, citizenYields(city));
+  const m = modifiersFor(state, city.owner);
+  addYields(y, m.cityYields);
+  if (city.isCapital) addYields(y, m.capitalYields);
+  for (const k of Object.keys(y) as (keyof Yields)[]) {
+    if (m.yieldPercent[k]) y[k] = Math.floor(y[k] * (1 + m.yieldPercent[k] / 100));
+  }
   return y;
 }
 
@@ -126,14 +161,15 @@ export function assignCitizens(state: GameState, city: City): void {
   const base = cityCenterYields(state, city);
   addYields(base, buildingYields(city));
   let food = base.food;
-  for (const i of worked) food += tileYields(state.map.tiles[i]).food;
+  const ty = (i: number) => cityTileYields(state, city, state.map.tiles[i]);
+  for (const i of worked) food += ty(i).food;
   const free = [...workable].filter((i) => !worked.includes(i));
   while (worked.length < city.population && free.length) {
     const surplus = food - city.population * FOOD_PER_POP;
     let best = 0;
     let bestScore = -Infinity;
     free.forEach((i, k) => {
-      const s = tileScore(tileYields(state.map.tiles[i]), city.focus, surplus) - i * 1e-9;
+      const s = tileScore(ty(i), city.focus, surplus) - i * 1e-9;
       if (s > bestScore) {
         bestScore = s;
         best = k;
@@ -141,7 +177,7 @@ export function assignCitizens(state: GameState, city: City): void {
     });
     const [pick] = free.splice(best, 1);
     worked.push(pick);
-    food += tileYields(state.map.tiles[pick]).food;
+    food += ty(pick).food;
   }
   city.worked = worked;
 }
@@ -190,6 +226,9 @@ export function cannotProduce(state: GameState, city: City, item: ProductionItem
   }
   const def = BUILDINGS[item.id];
   if (!def || def.auto) return 'Indisponível.';
+  if (def.requiresTech && !ownerTechs(state, city).includes(def.requiresTech)) {
+    return `Exige ${TECH_BY_ID[def.requiresTech]?.name ?? def.requiresTech}.`;
+  }
   if (city.buildings.includes(item.id)) return 'Já construído.';
   if (def.needsRiver && !hasFreshWater(state, city)) return 'Exige rio no centro da cidade.';
   if (def.needsCoast && !isCoastalCity(state, city)) return 'Exige cidade costeira.';
@@ -206,8 +245,27 @@ export function productionOptions(state: GameState, city: City): ProductionItem[
   return [...units, ...buildings];
 }
 
+/** Bônus percentual de produção (políticas/governo) para o item. */
+export function productionBonus(state: GameState, city: City, item: ProductionItem): number {
+  const m = modifiersFor(state, city.owner).productionPercent;
+  let pct = m.all;
+  if (item.kind === 'building') pct += m.building;
+  else {
+    const def = UNITS[item.id];
+    if (def?.class === 'military') pct += m.military;
+    if (item.id === 'settler') pct += m.settler;
+    if (item.id === 'builder') pct += m.builder;
+  }
+  return pct;
+}
+
+export function effectiveProduction(state: GameState, city: City, item: ProductionItem, base?: number): number {
+  const b = base ?? cityYields(state, city).production;
+  return b * (1 + productionBonus(state, city, item) / 100);
+}
+
 export function turnsToProduce(state: GameState, city: City, item: ProductionItem): number {
-  const prod = Math.max(1, cityYields(state, city).production);
+  const prod = Math.max(1, effectiveProduction(state, city, item));
   const remaining = itemCost(item) - (city.progress[itemKey(item)] ?? 0);
   return Math.max(1, Math.ceil(remaining / prod));
 }
@@ -242,7 +300,7 @@ export function completeItem(state: GameState, city: City, item: ProductionItem)
     const pos = spawnTile(state, city, def);
     if (pos === null) return null;
     const u: Unit = { id: state.nextId++, type: def.id, owner: city.owner, pos, movesLeft: 0 };
-    if (def.charges) u.charges = def.charges;
+    if (def.charges) u.charges = def.charges + modifiersFor(state, city.owner).builderCharges;
     state.units.push(u);
     if (def.popCost) {
       city.population = Math.max(1, city.population - def.popCost);
@@ -298,9 +356,9 @@ export function claimTile(state: GameState, city: City, idx: number): void {
 
 function expansionScore(state: GameState, city: City, i: number): number {
   const t = state.map.tiles[i];
-  const y = tileYields(t);
+  const y = cityTileYields(state, city, t);
   let s = y.food * 1.2 + y.production + y.gold * 0.6 + y.science + y.culture + y.faith;
-  if (t.resource) s += 2.5;
+  if (visibleResourceFor(state, city, t)) s += 2.5;
   if (t.wonder) s += 3;
   if (isWater(t)) s -= 0.5;
   s -= distance(state.map, city.pos, i) * 0.8;
@@ -317,7 +375,9 @@ export function tilePurchaseCost(state: GameState, city: City, idx: number): num
   const d = distance(state.map, city.pos, idx);
   const owned = state.map.tiles.filter((t) => t.cityId === city.id).length;
   const t = state.map.tiles[idx];
-  return Math.round(15 + 10 * (d - 1) + 2 * owned + (t.resource ? 10 : 0) + (t.wonder ? 20 : 0));
+  const base = 15 + 10 * (d - 1) + 2 * owned + (visibleResourceFor(state, city, t) ? 10 : 0) + (t.wonder ? 20 : 0);
+  const discount = modifiersFor(state, city.owner).tilePurchaseDiscount;
+  return Math.round(base * (1 - discount / 100));
 }
 
 export function purchaseTile(state: GameState, city: City, idx: number): string | null {
@@ -342,7 +402,8 @@ export function processCity(state: GameState, city: City): CityEvent[] {
 
   // comida e crescimento
   const surplus = foodSurplus(state, city, y);
-  const mod = surplus > 0 ? housingGrowthModifier(city.population, cityHousing(state, city)) : 1;
+  const growthPct = modifiersFor(state, city.owner).growthPercent;
+  const mod = surplus > 0 ? housingGrowthModifier(city.population, cityHousing(state, city)) * (1 + growthPct / 100) : 1;
   city.foodStored += surplus * mod;
   const need = growthThreshold(city.population);
   if (city.foodStored >= need) {
@@ -370,7 +431,8 @@ export function processCity(state: GameState, city: City): CityEvent[] {
     }
     const key = itemKey(item);
     const cost = itemCost(item);
-    const have = (city.progress[key] ?? 0) + prod;
+    const mult = 1 + productionBonus(state, city, item) / 100;
+    const have = (city.progress[key] ?? 0) + prod * mult;
     if (have >= cost) {
       const ev = completeItem(state, city, item);
       if (!ev) {
@@ -381,7 +443,7 @@ export function processCity(state: GameState, city: City): CityEvent[] {
       events.push(ev);
       delete city.progress[key];
       city.queue.shift();
-      prod = have - cost;
+      prod = (have - cost) / mult;
     } else {
       city.progress[key] = have;
       prod = 0;

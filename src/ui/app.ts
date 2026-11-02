@@ -34,7 +34,14 @@ import {
 import { canFoundCity } from '../rules/city';
 import { newGame, turnYear } from '../rules/game';
 import { findPath, reachableThisTurn } from '../rules/movement';
-import { describeTile, isPassableLand, tileYields } from '../rules/tiles';
+import { describeTile, isPassableLand, tileYields, visibleResource } from '../rules/tiles';
+import { governmentSlots, availableGovernments, availablePolicies, canSlotPolicy } from '../rules/effects';
+import { availableItems, needsResearchChoice, progressOf, treeCost, treeDepth, turnsFor, type TreeKind } from '../rules/research';
+import { improvementFits } from '../rules/builders';
+import { TECHS, TECH_BY_ID } from '../data/techs';
+import { CIVICS, CIVIC_BY_ID } from '../data/civics';
+import { GOVERNMENTS, GOVERNMENT_BY_ID, POLICY_BY_ID, SLOT_LABELS } from '../data/governments';
+import type { ImprovementId } from '../data/improvements';
 import { computeVisibility } from '../rules/visibility';
 import { screenToWorld } from '../render/camera';
 import { AUTOSAVE_SLOT, loadFromSlot, readSlotInfo, saveToSlot, SaveError } from '../state/save';
@@ -59,6 +66,8 @@ export class App {
   private selectedTile: number | undefined;
   private selectedCityId: number | undefined;
   private pendingBuyTile: number | undefined;
+  /** Turno em que o jogador já viu o aviso de políticas (só UI). */
+  private policyPromptSeenTurn = -1;
   private pendingPath: { target: number; path: number[]; turns: number } | undefined;
   private reachable: Set<number> | undefined;
   private revealAll = false;
@@ -190,6 +199,16 @@ export class App {
         return T.borderGrew(cname(ev.cityId));
       case 'info':
         return ev.message;
+      case 'techDone':
+        return ev.playerId === s.currentPlayer ? T.techDone(TECH_BY_ID[ev.id]?.name ?? ev.id) : null;
+      case 'civicDone':
+        return ev.playerId === s.currentPlayer ? `${T.civicDone(CIVIC_BY_ID[ev.id]?.name ?? ev.id)} ${T.policyWindow}` : null;
+      case 'boost':
+        return ev.playerId === s.currentPlayer
+          ? T.boosted(ev.kind, (ev.kind === 'tech' ? TECH_BY_ID : CIVIC_BY_ID)[ev.id]?.name ?? ev.id)
+          : null;
+      case 'governmentUnlocked':
+        return ev.playerId === s.currentPlayer ? T.govUnlocked(GOVERNMENT_BY_ID[ev.id]?.name ?? ev.id) : null;
       default:
         return null;
     }
@@ -317,6 +336,17 @@ export class App {
     if (needProd.length) {
       this.selectCity(needProd[0].id, true);
       this.showProduction();
+      return;
+    }
+    const choice = needsResearchChoice(this.state.players[this.state.currentPlayer]);
+    if (choice && this.state.cities.some((c) => c.owner === this.state!.currentPlayer)) {
+      this.showTree(choice);
+      return;
+    }
+    if (this.shouldPromptPolicies()) {
+      this.policyPromptSeenTurn = this.state.turn;
+      this.showGovernment();
+      this.renderHud();
       return;
     }
     const waiting = unitsNeedingOrders(this.state, this.state.currentPlayer);
@@ -497,8 +527,20 @@ export class App {
     const waiting = unitsNeedingOrders(s, s.currentPlayer);
     const needProd = citiesNeedingProduction(s, s.currentPlayer).length > 0;
     const showNextUnit = waiting.length > 1 || (waiting.length === 1 && waiting[0].id !== this.selectedUnitId);
-    this.el.endTurn.textContent = needProd ? T.chooseProduction : showNextUnit ? T.nextUnit : T.nextTurn;
-    this.el.endTurn.classList.toggle('attention', showNextUnit || needProd);
+    const hasCity = s.cities.some((c) => c.owner === s.currentPlayer);
+    const choice = hasCity ? needsResearchChoice(s.players[s.currentPlayer]) : null;
+    this.el.endTurn.textContent = needProd
+      ? T.chooseProduction
+      : choice === 'tech'
+        ? T.chooseResearch
+        : choice === 'civic'
+          ? T.chooseCivic
+          : this.shouldPromptPolicies()
+            ? T.setPolicies
+            : showNextUnit
+              ? T.nextUnit
+              : T.nextTurn;
+    this.el.endTurn.classList.toggle('attention', showNextUnit || needProd || !!choice || this.shouldPromptPolicies());
 
     const u = this.selectedUnit();
     const city = this.selectedCity();
@@ -541,6 +583,16 @@ export class App {
         );
       }
       const t = s.map.tiles[u.pos];
+      const techs = s.players[u.owner].techs;
+      const avail = new Set(availableImprovements(s, u));
+      if (t.owner === u.owner && u.movesLeft > 0 && !s.cities.some((c) => c.pos === u.pos)) {
+        for (const id of Object.keys(IMPROVEMENTS) as ImprovementId[]) {
+          const imp = IMPROVEMENTS[id];
+          if (avail.has(id) || t.improvement === id || !imp.requiresTech || techs.includes(imp.requiresTech)) continue;
+          if (!improvementFits(t, id, techs)) continue;
+          actions.push(h('button', { class: 'btn', disabled: true }, `${imp.icon} ${imp.name} (${T.requires} ${TECH_BY_ID[imp.requiresTech]?.name})`));
+        }
+      }
       if (canRemoveFeature(s, u).ok && t.feature) {
         const rem = FEATURE_REMOVAL[t.feature]!;
         actions.push(
@@ -582,15 +634,26 @@ export class App {
   private resourceBar(s: GameState): HTMLElement {
     const p = s.players[s.currentPlayer];
     const inc = playerIncome(s, s.currentPlayer);
-    const item = (icon: string, total: number, per: number, label: string) =>
-      h('span', { class: 'res', title: `${label}: ${total} (+${per} ${T.perTurn})` }, `${icon} ${Math.floor(total)}`, h('small', {}, ` +${per}`));
+    const item = (icon: string, main: string, per: number, label: string, onclick?: () => void) =>
+      h(
+        onclick ? 'button' : 'span',
+        { class: `res${onclick ? ' res-btn' : ''}`, title: `${label} (+${per} ${T.perTurn})`, 'aria-label': label, onclick },
+        `${icon} ${main}`,
+        h('small', {}, ` +${per}`),
+      );
+    const cur = (kind: TreeKind) => {
+      const id = kind === 'tech' ? p.researching : p.researchingCivic;
+      if (!id) return '—';
+      const t = turnsFor(p, kind, id, kind === 'tech' ? inc.science : inc.culture);
+      return isFinite(t) ? `${t}` : '∞';
+    };
     return h(
       'div',
       { class: 'resbar' },
-      item('🪙', p.gold, inc.gold, 'Ouro'),
-      item('🔬', p.science, inc.science, 'Ciência'),
-      item('🎭', p.culture, inc.culture, 'Cultura'),
-      item('✨', p.faith, inc.faith, 'Fé'),
+      item('🪙', String(Math.floor(p.gold)), inc.gold, 'Ouro'),
+      item('🔬', cur('tech'), inc.science, T.techTree, () => this.showTree('tech')),
+      item('🎭', cur('civic'), inc.culture, T.civicTree, () => this.showTree('civic')),
+      item('✨', String(Math.floor(p.faith)), inc.faith, 'Fé'),
     );
   }
 
@@ -740,6 +803,138 @@ export class App {
     openModal(host, `${T.production} — ${c.name}`, body);
   }
 
+  /** Há espaço de política vazio e troca permitida neste turno (aviso uma vez por turno). */
+  private shouldPromptPolicies(): boolean {
+    const s = this.state;
+    if (!s || this.policyPromptSeenTurn === s.turn) return false;
+    const p = s.players[s.currentPlayer];
+    if (!p.policyChangeAvailable) return false;
+    const slots = governmentSlots(p.government);
+    const pols = availablePolicies(p).filter((id) => !p.policies.includes(id));
+    return slots.some((sl, i) => !p.policies[i] && pols.some((id) => canSlotPolicy(sl, id)));
+  }
+
+  private showTree(kind: TreeKind): void {
+    const s = this.state;
+    if (!s) return;
+    const p = s.players[s.currentPlayer];
+    const host = this.modalHost();
+    const list = kind === 'tech' ? TECHS : CIVICS;
+    const byId = kind === 'tech' ? TECH_BY_ID : CIVIC_BY_ID;
+    const inc = playerIncome(s, s.currentPlayer);
+    const per = kind === 'tech' ? inc.science : inc.culture;
+    const knownIds = kind === 'tech' ? p.techs : p.civics;
+    const current = kind === 'tech' ? p.researching : p.researchingCivic;
+    const avail = new Set(availableItems(p, kind));
+    const memo = new Map<string, number>();
+    const tiers = new Map<number, typeof list>();
+    for (const d of list) {
+      const t = treeDepth(kind, d.id, memo);
+      tiers.set(t, [...(tiers.get(t) ?? []), d]);
+    }
+    const card = (d: (typeof list)[number]) => {
+      const done = knownIds.includes(d.id);
+      const isCur = current === d.id;
+      const cost = treeCost(p, kind, d.id);
+      const prog = progressOf(p, kind, d.id);
+      const state = done ? T.researched : isCur ? T.researching : avail.has(d.id) ? T.available : T.locked;
+      const turns = done ? '' : ` · ${isFinite(turnsFor(p, kind, d.id, per)) ? T.turns(turnsFor(p, kind, d.id, per)) : '∞'}`;
+      const boostLabel = kind === 'tech' ? T.eureka : T.inspiration;
+      return h(
+        'button',
+        {
+          class: `tree-card${done ? ' done' : ''}${isCur ? ' current' : ''}${avail.has(d.id) ? ' available' : ''}`,
+          disabled: !avail.has(d.id) || done,
+          onclick: () => {
+            if (this.dispatch({ type: 'setResearch', kind, id: d.id })) {
+              closeModal(host);
+              this.renderHud();
+            }
+          },
+        },
+        h('strong', {}, `${done ? '✓ ' : ''}${d.name}`),
+        h('small', {}, `${state} · ${Math.floor(prog)}/${cost}${turns}`),
+        h('small', { class: 'muted' }, d.description),
+        d.prereqs.length && !done ? h('small', { class: 'muted' }, `${T.requires}: ${d.prereqs.map((r) => byId[r]?.name ?? r).join(', ')}`) : null,
+        d.boost && !done
+          ? h(
+              'small',
+              { class: p.boosts.includes(d.id) ? 'boost ok' : 'boost' },
+              `💡 ${boostLabel}: ${d.boost.description}${p.boosts.includes(d.id) ? ` — ${T.boostDone}` : ''}`,
+            )
+          : null,
+        isCur ? h('span', { class: 'bar' }, h('span', { style: `width:${Math.min(100, (prog / cost) * 100)}%` })) : null,
+      );
+    };
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, `${kind === 'tech' ? '🔬' : '🎭'} +${per} ${T.perTurn}`),
+      kind === 'civic' ? h('button', { class: 'btn', onclick: () => this.showGovernment() }, '🏛 ' + T.government) : null,
+      ...[...tiers.keys()]
+        .sort((a, b) => a - b)
+        .flatMap((t) => [h('label', { class: 'field-label' }, T.tier(t)), h('div', { class: 'tree-grid' }, ...tiers.get(t)!.map(card))]),
+    );
+    openModal(host, kind === 'tech' ? T.techTree : T.civicTree, body);
+  }
+
+  private showGovernment(): void {
+    const s = this.state;
+    if (!s) return;
+    const p = s.players[s.currentPlayer];
+    const host = this.modalHost();
+    const reopen = () => {
+      this.renderHud();
+      this.showGovernment();
+    };
+    const govs = new Set(availableGovernments(p));
+    const govCards = GOVERNMENTS.filter((g) => govs.has(g.id)).map((g) =>
+      h(
+        'button',
+        {
+          class: `tree-card available${p.government === g.id ? ' current' : ''}`,
+          disabled: p.government === g.id || !p.policyChangeAvailable,
+          onclick: () => this.dispatch({ type: 'setGovernment', id: g.id }) && reopen(),
+        },
+        h('strong', {}, `${p.government === g.id ? '✓ ' : ''}${g.name}`),
+        h('small', {}, `${SLOT_LABELS.military} ${g.slots.military} · ${SLOT_LABELS.economic} ${g.slots.economic} · ${SLOT_LABELS.wildcard} ${g.slots.wildcard}`),
+        h('small', { class: 'muted' }, g.description),
+      ),
+    );
+    const pols = availablePolicies(p);
+    const slots = governmentSlots(p.government).map((slot, i) => {
+      const sel = h(
+        'select',
+        {
+          class: 'policy-select',
+          disabled: !p.policyChangeAvailable,
+          'aria-label': `${SLOT_LABELS[slot]} ${i + 1}`,
+          onchange: (e: Event) => {
+            const v = (e.target as HTMLSelectElement).value;
+            if (!this.dispatch({ type: 'setPolicy', slot: i, policy: v || null })) reopen();
+            else reopen();
+          },
+        },
+        h('option', { value: '' }, T.emptySlotPolicy),
+        ...pols
+          .filter((id) => canSlotPolicy(slot, id))
+          .map((id) => h('option', { value: id, selected: p.policies[i] === id }, `${POLICY_BY_ID[id].name} — ${POLICY_BY_ID[id].description}`)),
+      );
+      return h('div', { class: 'slot-row' }, h('span', { class: `slot-tag ${slot}` }, SLOT_LABELS[slot]), sel);
+    });
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: p.policyChangeAvailable ? 'hint' : 'muted' }, p.policyChangeAvailable ? T.policyWindow : T.policyLocked),
+      p.government ? null : h('p', { class: 'muted' }, T.noGovernment),
+      govCards.length ? h('label', { class: 'field-label' }, 'Governos') : null,
+      govCards.length ? h('div', { class: 'tree-grid' }, ...govCards) : null,
+      slots.length ? h('label', { class: 'field-label' }, 'Políticas') : null,
+      ...slots,
+    );
+    openModal(host, T.government, body);
+  }
+
   private tilePanel(idx: number): HTMLElement {
     const s = this.state!;
     const explored = this.revealAll || s.players[s.currentPlayer].explored[idx] === 1;
@@ -750,11 +945,13 @@ export class App {
       const w = WONDER_BY_ID[t.wonder];
       lines.push(h('small', { class: 'wonder' }, `★ ${w.name}`), h('small', { class: 'muted' }, w.description));
     }
-    if (t.resource) {
-      const r = RESOURCE_BY_ID[t.resource];
+    const techs = this.revealAll ? undefined : s.players[s.currentPlayer].techs;
+    const res = visibleResource(t, techs);
+    if (res) {
+      const r = RESOURCE_BY_ID[res];
       lines.push(h('small', {}, `${r.icon} ${r.name} (${RESOURCE_KIND_LABEL[r.kind]})`));
     }
-    const y = tileYields(t);
+    const y = tileYields(t, techs);
     const ys = YIELD_KEYS.filter((k) => y[k] > 0)
       .map((k) => `${YIELD_LABELS[k].icon} ${y[k]}`)
       .join('  ');
@@ -800,6 +997,9 @@ export class App {
     const body = h(
       'div',
       { class: 'menu-list' },
+      h('button', { class: 'btn wide', onclick: () => this.showTree('tech') }, '🔬 ' + T.techTree),
+      h('button', { class: 'btn wide', onclick: () => this.showTree('civic') }, '🎭 ' + T.civicTree),
+      h('button', { class: 'btn wide', onclick: () => this.showGovernment() }, '🏛 ' + T.government),
       h('button', { class: 'btn wide', onclick: () => this.showSave() }, '💾 ' + T.save),
       h('button', { class: 'btn wide', onclick: () => this.showLoad(true) }, '📂 ' + T.load),
       h('button', { class: 'btn wide', onclick: () => this.showNewGame(true) }, '✦ ' + T.newGame),

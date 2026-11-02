@@ -13,7 +13,9 @@ import {
   type CityEvent,
 } from './cities';
 import { canFoundCity, foundCity } from './city';
-import { findPath, moveOneStep } from './movement';
+import { setGovernment, setPolicy } from './effects';
+import { findPath, maxMoves, moveOneStep } from './movement';
+import { checkBoosts, processResearch, setResearch, type ResearchEvent, type TreeKind } from './research';
 import { revealForPlayer } from './visibility';
 
 /**
@@ -36,6 +38,9 @@ export type Action =
   | { type: 'purchaseTile'; cityId: number; tile: number }
   | { type: 'toggleTile'; cityId: number; tile: number }
   | { type: 'setFocus'; cityId: number; focus: CityFocus }
+  | { type: 'setResearch'; kind: TreeKind; id: string }
+  | { type: 'setGovernment'; id: string }
+  | { type: 'setPolicy'; slot: number; policy: string | null }
   | { type: 'endTurn' };
 
 export type GameEvent =
@@ -44,7 +49,8 @@ export type GameEvent =
   | { type: 'unitMoved'; unitId: number; from: number; to: number }
   | { type: 'turnStarted'; turn: number }
   | { type: 'info'; message: string }
-  | CityEvent;
+  | CityEvent
+  | ResearchEvent;
 
 export interface ActionResult {
   state: GameState;
@@ -186,28 +192,51 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
       assignCitizens(state, c);
       break;
     }
+    case 'setResearch': {
+      const why = setResearch(state.players[state.currentPlayer], action.kind, action.id);
+      if (why) return fail(why);
+      break;
+    }
+    case 'setGovernment':
+    case 'setPolicy': {
+      const p = state.players[state.currentPlayer];
+      const why = action.type === 'setGovernment' ? setGovernment(p, action.id) : setPolicy(p, action.slot, action.policy);
+      if (why) return fail(why);
+      for (const c of state.cities) if (c.owner === p.id) assignCitizens(state, c);
+      break;
+    }
     case 'endTurn': {
       events.push(...endTurn(state));
       events.push({ type: 'turnStarted', turn: state.turn });
       break;
     }
   }
+  // eurecas/inspirações obtidas pela ação
+  if (action.type !== 'endTurn') events.push(...checkBoosts(state, state.currentPlayer));
   return { state, events };
 }
 
 /** Fim de turno (muta). Processa cidades, depois renova unidades. */
-export function endTurn(state: GameState): CityEvent[] {
-  const events: CityEvent[] = [];
+export function endTurn(state: GameState): (CityEvent | ResearchEvent)[] {
+  const events: (CityEvent | ResearchEvent)[] = [];
+  for (const p of state.players) p.policyChangeAvailable = false;
   for (const c of [...state.cities]) events.push(...processCity(state, c));
+  for (const p of state.players) {
+    events.push(...checkBoosts(state, p.id));
+    events.push(...processResearch(state, p.id));
+  }
   state.turn++;
   for (const u of state.units) {
-    u.movesLeft = UNITS[u.type].moves;
+    u.movesLeft = maxMoves(state, u);
     u.skipped = false;
   }
   for (const u of state.units) {
     if (u.path?.length) advanceAlongPath(state, u);
   }
-  for (const p of state.players) revealForPlayer(state, p.id);
+  for (const p of state.players) {
+    revealForPlayer(state, p.id);
+    events.push(...checkBoosts(state, p.id));
+  }
   return events;
 }
 

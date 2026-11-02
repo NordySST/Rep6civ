@@ -5,7 +5,7 @@ import { TERRAINS } from '../data/terrains';
 import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
 import type { GameState, Tile } from '../state/types';
-import { tileYields } from '../rules/tiles';
+import { tileYields, visibleResource } from '../rules/tiles';
 import { colRow, hexCorner, hexToPixel, neighbor, pixelToOffset, SQRT3 } from '../rules/hex';
 import { type Camera, screenToWorld, worldToScreen } from './camera';
 
@@ -103,6 +103,7 @@ export class Renderer {
     const { ctx } = this;
     const playerId = state.currentPlayer;
     const explored = state.players[playerId].explored;
+    const techs = state.players[playerId].techs;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = '#0b0f14';
     ctx.fillRect(0, 0, this.vw, this.vh);
@@ -178,7 +179,7 @@ export class Renderer {
 
     // recursos e maravilhas
     if (detail) {
-      for (const i of visibleIdx) this.drawTileIcons(state.map.tiles[i], tileCenter(state, i), cam.zoom);
+      for (const i of visibleIdx) this.drawTileIcons(state.map.tiles[i], tileCenter(state, i), cam.zoom, overlay.revealAll ? undefined : techs);
     }
 
     // névoa: explorado mas não visível
@@ -380,7 +381,7 @@ export class Renderer {
     }
   }
 
-  private drawTileIcons(t: Tile, c: { x: number; y: number }, zoom: number): void {
+  private drawTileIcons(t: Tile, c: { x: number; y: number }, zoom: number, techs?: readonly string[]): void {
     const { ctx } = this;
     if (t.wonder) {
       const w = WONDER_BY_ID[t.wonder];
@@ -403,8 +404,9 @@ export class Renderer {
       }
       return;
     }
-    if (t.resource) {
-      const r = RESOURCE_BY_ID[t.resource];
+    const res = visibleResource(t, techs);
+    if (res) {
+      const r = RESOURCE_BY_ID[res];
       if (!r) return;
       const bx = c.x + 12;
       const by = c.y - 12;
@@ -560,7 +562,7 @@ export class Renderer {
         hexPath(ctx, x, y, HEX_SIZE - 2);
         ctx.fill();
       }
-      this.drawYieldPips(tileYields(state.map.tiles[i]), x, y);
+      this.drawYieldPips(tileYields(state.map.tiles[i], state.players[state.currentPlayer].techs), x, y);
       if (v.worked.has(i)) {
         ctx.fillStyle = v.locked.has(i) ? '#ffd23f' : '#ffffff';
         ctx.strokeStyle = '#222';
@@ -576,7 +578,7 @@ export class Renderer {
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       hexPath(ctx, x, y, HEX_SIZE - 2);
       ctx.fill();
-      this.drawYieldPips(tileYields(state.map.tiles[i]), x, y);
+      this.drawYieldPips(tileYields(state.map.tiles[i], state.players[state.currentPlayer].techs), x, y);
       ctx.fillStyle = 'rgba(40, 30, 5, 0.9)';
       roundRect(ctx, x - 15, y - 22, 30, 13, 5);
       ctx.fill();

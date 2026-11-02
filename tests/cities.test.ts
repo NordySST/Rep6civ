@@ -17,6 +17,7 @@ import {
 import { foundCity } from '../src/rules/city';
 import { distance, neighbor } from '../src/rules/hex';
 import { deserialize } from '../src/state/save';
+import { SCHEMA_VERSION } from '../src/state/version';
 import type { GameState } from '../src/state/types';
 import { flatGame } from './helpers';
 
@@ -196,13 +197,13 @@ describe('fronteiras', () => {
     const item = { kind: 'unit' as const, id: 'warrior' };
     s.players[0].gold = purchaseCost(city, item);
     const { state, events } = applyAction(s, { type: 'purchaseItem', cityId: city.id, item });
-    expect(events).toEqual([]);
+    expect(events.filter((e) => e.type === 'error')).toEqual([]);
     expect(state.players[0].gold).toBe(0);
     expect(state.units.some((u) => u.type === 'warrior' && u.pos === city.pos)).toBe(true);
   });
 });
 
-describe('migração v1 → v2', () => {
+describe('migração v1 → atual', () => {
   it('converte save da etapa 1 com cidade e normaliza cidadãos', () => {
     const { s } = withCity();
     // simula o formato v1
@@ -214,7 +215,9 @@ describe('migração v1 → v2', () => {
         delete c[k];
     const env = { format: 'rep6civ-save', version: 1, savedAt: '', meta: {}, state: v1 };
     const loaded: GameState = normalizeState(deserialize(JSON.stringify(env)));
-    expect(loaded.schemaVersion).toBe(2);
+    expect(loaded.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(loaded.players[0].techs).toEqual([]);
+    expect(loaded.players[0].government).toBeNull();
     expect(loaded.players[0].gold).toBe(10);
     expect(loaded.cities[0].buildings).toEqual(['palace']);
     expect(loaded.cities[0].worked).toHaveLength(1);
