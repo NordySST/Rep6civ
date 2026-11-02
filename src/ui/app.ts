@@ -64,6 +64,7 @@ import {
 import { loadPrefs, savePrefs, applyPrefs, type Prefs } from './prefs';
 import { play, setSoundEnabled, unlockAudio, type Sfx } from './audio';
 import { TIPS } from './tutorial';
+import { icon } from './icons';
 import { cityAmenities, effectiveLuxuries, maintenanceOf, tradeableLuxuries } from '../rules/economy';
 import { gpCost, gpPerTurn } from '../rules/greatPeople';
 import {
@@ -107,10 +108,11 @@ import { newGame, turnYear } from '../rules/game';
 import { findPath, reachableThisTurn } from '../rules/movement';
 import { describeTile, isPassableLand, tileYields, visibleResource } from '../rules/tiles';
 import { governmentSlots, availableGovernments, availablePolicies, canSlotPolicy, policyUnlockCost } from '../rules/effects';
-import { availableItems, needsResearchChoice, progressOf, treeCost, treeDepth, turnsFor, type TreeKind } from '../rules/research';
+import { needsResearchChoice, pathTo, turnsFor, type TreeKind } from '../rules/research';
+import { buildTree } from './techTree';
 import { improvementFits } from '../rules/builders';
-import { TECHS, TECH_BY_ID } from '../data/techs';
-import { CIVICS, CIVIC_BY_ID } from '../data/civics';
+import { TECH_BY_ID } from '../data/techs';
+import { CIVIC_BY_ID } from '../data/civics';
 import { GOVERNMENTS, GOVERNMENT_BY_ID, POLICY_BY_ID, SLOT_LABELS } from '../data/governments';
 import type { ImprovementId } from '../data/improvements';
 import { computeVisibility } from '../rules/visibility';
@@ -1359,8 +1361,8 @@ export class App {
         h('strong', {}, `${T.turn} ${s.turn}`),
         h('small', {}, turnYear(s.turn)),
       ),
-      h('button', { class: 'btn icon', 'aria-label': T.diplomacy, onclick: () => this.showDiplomacy() }, '🤝'),
-      h('button', { class: 'btn icon', 'aria-label': T.menu, onclick: () => this.showGameMenu() }, '☰'),
+      h('button', { class: 'btn icon', 'aria-label': T.diplomacy, onclick: () => this.showDiplomacy() }, icon('diplomacy')),
+      h('button', { class: 'btn icon', 'aria-label': T.menu, onclick: () => this.showGameMenu() }, icon('menu')),
     );
 
     const waiting = unitsNeedingOrders(s, s.currentPlayer);
@@ -1546,12 +1548,13 @@ export class App {
   private resourceBar(s: GameState): HTMLElement {
     const p = s.players[s.currentPlayer];
     const inc = playerIncome(s, s.currentPlayer);
-    const item = (icon: string, main: string, per: number, label: string, onclick?: () => void) =>
+    const item = (ic: string, main: string, per: number, label: string, onclick?: () => void) =>
       h(
         onclick ? 'button' : 'span',
         { class: `res${onclick ? ' res-btn' : ''}`, title: `${label} (+${per} ${T.perTurn})`, 'aria-label': label, onclick },
-        `${icon} ${main}`,
-        h('small', {}, ` +${per}`),
+        icon(ic, `y-${ic}`),
+        ` ${main}`,
+        h('small', {}, ` ${per >= 0 ? '+' : ''}${per}`),
       );
     const cur = (kind: TreeKind) => {
       const id = kind === 'tech' ? p.researching : p.researchingCivic;
@@ -1562,10 +1565,10 @@ export class App {
     return h(
       'div',
       { class: 'resbar' },
-      item('🪙', String(Math.floor(p.gold)), inc.gold - maintenanceOf(s, s.currentPlayer).total, 'Ouro', () => this.showEconomy()),
-      item('🔬', cur('tech'), inc.science, T.techTree, () => this.showTree('tech')),
-      item('🎭', cur('civic'), inc.culture, T.civicTree, () => this.showTree('civic')),
-      item('✨', String(Math.floor(p.faith)), inc.faith, 'Fé', () => this.showReligion()),
+      item('gold', String(Math.floor(p.gold)), inc.gold - maintenanceOf(s, s.currentPlayer).total, 'Ouro', () => this.showEconomy()),
+      item('science', cur('tech'), inc.science, T.techTree, () => this.showTree('tech')),
+      item('culture', cur('civic'), inc.culture, T.civicTree, () => this.showTree('civic')),
+      item('faith', String(Math.floor(p.faith)), inc.faith, 'Fé', () => this.showReligion()),
     );
   }
 
@@ -2489,68 +2492,37 @@ export class App {
     openModal(host, `${T.promote} — ${UNITS[u.type].name}`, body);
   }
 
-  private showTree(kind: TreeKind): void {
+  private showTree(kind: TreeKind, selected?: string): void {
     const s = this.state;
     if (!s) return;
     const p = s.players[s.currentPlayer];
     const host = this.modalHost();
-    const list = kind === 'tech' ? TECHS : CIVICS;
-    const byId = kind === 'tech' ? TECH_BY_ID : CIVIC_BY_ID;
     const inc = playerIncome(s, s.currentPlayer);
     const per = kind === 'tech' ? inc.science : inc.culture;
-    const knownIds = kind === 'tech' ? p.techs : p.civics;
-    const current = kind === 'tech' ? p.researching : p.researchingCivic;
-    const avail = new Set(availableItems(p, kind));
-    const memo = new Map<string, number>();
-    const tiers = new Map<number, typeof list>();
-    for (const d of list) {
-      const t = treeDepth(kind, d.id, memo);
-      tiers.set(t, [...(tiers.get(t) ?? []), d]);
-    }
-    const card = (d: (typeof list)[number]) => {
-      const done = knownIds.includes(d.id);
-      const isCur = current === d.id;
-      const cost = treeCost(p, kind, d.id);
-      const prog = progressOf(p, kind, d.id);
-      const state = done ? T.researched : isCur ? T.researching : avail.has(d.id) ? T.available : T.locked;
-      const turns = done ? '' : ` · ${isFinite(turnsFor(p, kind, d.id, per)) ? T.turns(turnsFor(p, kind, d.id, per)) : '∞'}`;
-      const boostLabel = kind === 'tech' ? T.eureka : T.inspiration;
-      return h(
-        'button',
-        {
-          class: `tree-card${done ? ' done' : ''}${isCur ? ' current' : ''}${avail.has(d.id) ? ' available' : ''}`,
-          disabled: !avail.has(d.id) || done,
-          onclick: () => {
-            if (this.dispatch({ type: 'setResearch', kind, id: d.id })) {
-              closeModal(host);
-              this.renderHud();
-            }
-          },
-        },
-        h('strong', {}, `${done ? '✓ ' : ''}${d.name}`),
-        h('small', {}, `${state} · ${Math.floor(prog)}/${cost}${turns}`),
-        h('small', { class: 'muted' }, d.description),
-        d.prereqs.length && !done ? h('small', { class: 'muted' }, `${T.requires}: ${d.prereqs.map((r) => byId[r]?.name ?? r).join(', ')}`) : null,
-        d.boost && !done
-          ? h(
-              'small',
-              { class: p.boosts.includes(d.id) ? 'boost ok' : 'boost' },
-              `💡 ${boostLabel}: ${d.boost.description}${p.boosts.includes(d.id) ? ` — ${T.boostDone}` : ''}`,
-            )
-          : null,
-        isCur ? h('span', { class: 'bar' }, h('span', { style: `width:${Math.min(100, (prog / cost) * 100)}%` })) : null,
-      );
-    };
-    const body = h(
+    const tree = buildTree({
+      kind,
+      player: p,
+      perTurn: per,
+      selected,
+      onPick: (id) => {
+        const steps = pathTo(p, kind, id).length;
+        if (this.dispatch({ type: 'setResearch', kind, id })) {
+          this.renderHud();
+          const def = (kind === 'tech' ? TECH_BY_ID : CIVIC_BY_ID)[id];
+          if (steps > 1 && def) this.toast(T.targetSet(def.name, steps));
+          this.showTree(kind, id);
+        }
+      },
+    });
+    const head = h(
       'div',
-      { class: 'form' },
+      { class: 'tt-head' },
       h('small', { class: 'muted' }, `${kind === 'tech' ? '🔬' : '🎭'} +${per} ${T.perTurn}`),
+      h('button', { class: `btn${kind === 'tech' ? ' on' : ''}`, onclick: () => this.showTree('tech') }, T.techTree),
+      h('button', { class: `btn${kind === 'civic' ? ' on' : ''}`, onclick: () => this.showTree('civic') }, T.civicTree),
       kind === 'civic' ? h('button', { class: 'btn', onclick: () => this.showGovernment() }, '🏛 ' + T.government) : null,
-      ...[...tiers.keys()]
-        .sort((a, b) => a - b)
-        .flatMap((t) => [h('label', { class: 'field-label' }, T.tier(t)), h('div', { class: 'tree-grid' }, ...tiers.get(t)!.map(card))]),
     );
-    openModal(host, kind === 'tech' ? T.techTree : T.civicTree, body);
+    openModal(host, kind === 'tech' ? T.techTree : T.civicTree, h('div', { class: 'tt-wrap' }, head, tree), { size: 'full' });
   }
 
   private showGovernment(): void {

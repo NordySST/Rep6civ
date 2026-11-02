@@ -194,6 +194,10 @@ export interface Player {
   techProgress: Record<string, number>;
   civics: string[];
   researchingCivic: string | null;
+  /** Destino da pesquisa: os pré-requisitos no caminho são pesquisados em sequência. */
+  researchTarget?: string;
+  /** Destino das cívicas (idem). */
+  civicTarget?: string;
   civicProgress: Record<string, number>;
   /** Tecnologias/cívicas com eureca/inspiração obtida. */
   boosts: string[];

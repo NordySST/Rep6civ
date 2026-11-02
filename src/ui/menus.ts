@@ -16,13 +16,13 @@ export function closeModal(host: ModalHost): void {
   clear(host.root);
 }
 
-export function openModal(host: ModalHost, title: string, body: Node, opts: { closable?: boolean } = {}): void {
+export function openModal(host: ModalHost, title: string, body: Node, opts: { closable?: boolean; size?: 'full' } = {}): void {
   clear(host.root);
   const closable = opts.closable ?? true;
   host.root.dataset.closable = closable ? '1' : '0';
   const card = h(
     'div',
-    { class: 'modal-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+    { class: `modal-card${opts.size === 'full' ? ' full' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h(
       'div',
       { class: 'modal-head' },
