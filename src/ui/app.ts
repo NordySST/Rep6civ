@@ -1,4 +1,3 @@
-import { BUILDINGS } from '../data/buildings';
 import { CIV_BY_ID } from '../data/civs';
 import { FEATURE_REMOVAL, IMPROVEMENTS } from '../data/improvements';
 import { RESOURCE_BY_ID, RESOURCE_KIND_LABEL } from '../data/resources';
@@ -38,6 +37,7 @@ import {
   growthThreshold,
   itemCost,
   itemKey,
+  itemDescription,
   itemName,
   normalizeState,
   playerIncome,
@@ -49,6 +49,9 @@ import {
   workableTiles,
 } from '../rules/cities';
 import { canFoundCity } from '../rules/city';
+import { adjacencyBonus, districtLimit, districtSites, wonderSites } from '../rules/districts';
+import { DISTRICTS, type DistrictId } from '../data/districts';
+import { WORLD_WONDER_BY_ID } from '../data/worldWonders';
 import {
   attackTargets,
   canPromote,
@@ -97,6 +100,8 @@ export class App {
   private pendingBuyTile: number | undefined;
   /** Alvo de ataque aguardando confirmação (unidade ou cidade selecionada). */
   private pendingAttack: number | undefined;
+  /** Escolha de hexágono para distrito/maravilha. */
+  private placement: { cityId: number; item: ProductionItem; mode: 'set' | 'enqueue'; sites: number[]; chosen?: number } | undefined;
   /** Turno em que o jogador já viu o aviso de políticas (só UI). */
   private policyPromptSeenTurn = -1;
   private pendingPath: { target: number; path: number[]; turns: number } | undefined;
@@ -163,8 +168,9 @@ export class App {
         path: this.pendingPath?.path ?? this.selectedUnit()?.path,
         pathTurns: this.pendingPath?.turns ?? this.pathTurnsForSelected(),
         revealAll: this.revealAll,
-        cityView: this.cityViewOverlay(),
-        attackTargets: this.currentAttackTargets(),
+        cityView: this.placement ? undefined : this.cityViewOverlay(),
+        attackTargets: this.placement ? undefined : this.currentAttackTargets(),
+        placement: this.placementOverlay(),
         pendingAttack: this.pendingAttack,
         cityInfo: this.cityInfo(),
       };
@@ -227,8 +233,11 @@ export class App {
     switch (ev.type) {
       case 'cityFounded':
         return T.cityFounded(ev.name);
-      case 'produced':
-        return s.cities.find((c) => c.id === ev.cityId)?.owner === s.currentPlayer ? T.produced(cname(ev.cityId), itemName(ev.item)) : null;
+      case 'produced': {
+        const owner = s.cities.find((c) => c.id === ev.cityId)?.owner;
+        if (ev.item.kind === 'wonder') return T.wonderBuilt(itemName(ev.item), owner === undefined ? '?' : playerName(s, owner));
+        return owner === s.currentPlayer ? T.produced(cname(ev.cityId), itemName(ev.item)) : null;
+      }
       case 'grew':
         return T.grew(cname(ev.cityId), ev.population);
       case 'starved':
@@ -328,6 +337,65 @@ export class App {
       });
     }
     return m;
+  }
+
+  private startPlacement(c: City, item: ProductionItem, mode: 'set' | 'enqueue'): void {
+    const s = this.state!;
+    const sites = item.kind === 'district' ? districtSites(s, c, item.id) : wonderSites(s, c, item.id);
+    if (!sites.length) return this.toast(T.noSites);
+    this.placement = { cityId: c.id, item: { kind: item.kind, id: item.id }, mode, sites };
+    this.selectedCityId = c.id;
+    this.centerOn(c.pos);
+    this.renderHud();
+    this.invalidate();
+  }
+
+  private placementOverlay(): Overlay['placement'] {
+    const s = this.state;
+    const pl = this.placement;
+    if (!s || !pl) return undefined;
+    const sites = new Map<number, string>();
+    for (const i of pl.sites) {
+      if (pl.item.kind === 'district') {
+        const def = DISTRICTS[pl.item.id as DistrictId];
+        sites.set(i, def?.yieldKey ? `+${adjacencyBonus(s, i, pl.item.id)} ${def.icon}` : def?.icon ?? '');
+      } else sites.set(i, '★');
+    }
+    return { sites, chosen: pl.chosen };
+  }
+
+  private confirmPlacement(): void {
+    const pl = this.placement;
+    if (!pl || pl.chosen === undefined) return;
+    const item: ProductionItem = { ...pl.item, tile: pl.chosen };
+    const ok = this.dispatch({ type: pl.mode === 'set' ? 'setProduction' : 'enqueue', cityId: pl.cityId, item });
+    if (ok) {
+      this.placement = undefined;
+      this.renderHud();
+      this.invalidate();
+    }
+  }
+
+  private cancelPlacement(): void {
+    this.placement = undefined;
+    this.renderHud();
+    this.invalidate();
+  }
+
+  private placementPanel(): HTMLElement {
+    const s = this.state!;
+    const pl = this.placement!;
+    const c = s.cities.find((x) => x.id === pl.cityId)!;
+    const lines: HTMLElement[] = [
+      h('strong', {}, T.placeTitle(itemName(pl.item), c.name)),
+      h('small', { class: 'muted' }, itemDescription(pl.item)),
+      h('small', { class: 'hint' }, pl.chosen === undefined ? T.placeHint : T.placeConfirm(describeTile(s.map.tiles[pl.chosen]))),
+    ];
+    const actions = [
+      h('button', { class: 'btn primary', disabled: pl.chosen === undefined, onclick: () => this.confirmPlacement() }, '✔ ' + T.confirm),
+      h('button', { class: 'btn', onclick: () => this.cancelPlacement() }, '✕ ' + T.cancel),
+    ];
+    return h('div', { class: 'panel-inner' }, h('div', { class: 'panel-info' }, ...lines), h('div', { class: 'actions' }, ...actions));
   }
 
   private currentAttackTargets(): Set<number> | undefined {
@@ -530,6 +598,19 @@ export class App {
     const me = s.currentPlayer;
     const sel = this.selectedUnit();
 
+    // posicionamento de distrito/maravilha
+    if (this.placement) {
+      if (this.placement.sites.includes(idx)) {
+        if (this.placement.chosen === idx) this.confirmPlacement();
+        else {
+          this.placement.chosen = idx;
+          this.renderHud();
+          this.invalidate();
+        }
+      }
+      return;
+    }
+
     // ataque: primeiro toque mostra a previsão, segundo confirma
     const targets = this.currentAttackTargets();
     if (targets?.has(idx)) {
@@ -624,6 +705,7 @@ export class App {
     else if (e.key === '-') this.zoomBy(0.8);
     else if (e.key === 'b' || e.key === 'B') this.foundCity();
     else if (e.key === ' ') this.skipSelected();
+    else if (e.key === 'Escape' && this.placement) this.cancelPlacement();
     else if (e.key === 'Escape') {
       this.selectUnit(undefined);
       this.selectCity(undefined);
@@ -711,7 +793,8 @@ export class App {
 
     const u = this.selectedUnit();
     const city = this.selectedCity();
-    if (city) this.el.panel.append(this.cityPanel(city));
+    if (this.placement) this.el.panel.append(this.placementPanel());
+    else if (city) this.el.panel.append(this.cityPanel(city));
     else if (u) this.el.panel.append(this.unitPanel(u));
     else if (this.selectedTile !== undefined) this.el.panel.append(this.tilePanel(this.selectedTile));
     else if (waiting.length) this.el.panel.append(h('p', { class: 'muted' }, T.unitsWaiting(waiting.length)));
@@ -866,6 +949,11 @@ export class App {
       ),
       ...this.attackPreviewLines(),
     ];
+    if (c.districts.length || c.wonders.length) {
+      const ds = c.districts.map((d) => `${DISTRICTS[d.type as DistrictId]?.icon ?? ''} ${DISTRICTS[d.type as DistrictId]?.name ?? d.type}`);
+      const ws = c.wonders.map((w) => `★ ${WORLD_WONDER_BY_ID[w]?.name ?? w}`);
+      lines.splice(4, 0, h('small', {}, [...ds, ...ws].join(' · ')));
+    }
     const actions: HTMLElement[] = [
       ...(this.pendingAttack !== undefined ? [h('button', { class: 'btn danger', onclick: () => this.confirmAttack() }, '🏹 ' + T.attack)] : []),
       h('button', { class: `btn ${item ? '' : 'primary'}`, onclick: () => this.showProduction() }, '⚒ ' + T.production),
@@ -918,7 +1006,15 @@ export class App {
     };
     const row = (item: ProductionItem) => {
       const why = cannotProduce(s, c, item);
-      const def = item.kind === 'unit' ? UNITS[item.id] : BUILDINGS[item.id];
+      const placed = item.kind === 'district' || item.kind === 'wonder';
+      const icon =
+        item.kind === 'unit'
+          ? UNITS[item.id].glyph
+          : item.kind === 'district'
+            ? DISTRICTS[item.id as DistrictId]?.icon ?? '▣'
+            : item.kind === 'wonder'
+              ? '★'
+              : '🏛';
       const price = purchaseCost(c, item);
       const isCurrent = c.queue[0] && itemKey(c.queue[0]) === itemKey(item);
       return h(
@@ -930,33 +1026,49 @@ export class App {
             class: 'prod-main',
             disabled: !!why,
             onclick: () => {
+              if (placed) {
+                closeModal(host);
+                this.startPlacement(c, item, 'set');
+                return;
+              }
               if (this.dispatch({ type: 'setProduction', cityId: c.id, item })) {
                 closeModal(host);
                 this.renderHud();
               }
             },
           },
-          h('strong', {}, `${item.kind === 'unit' ? (def as { glyph: string }).glyph + ' ' : '🏛 '}${def?.name ?? item.id}`),
-          h('small', {}, why ?? `${itemCost(item)} ⚒ · ${T.turns(turnsToProduce(s, c, item))}`),
-          h('small', { class: 'muted' }, def?.description ?? ''),
+          h('strong', {}, `${icon} ${itemName(item)}`),
+          h('small', {}, why ?? `${itemCost(item)} ⚒ · ${T.turns(turnsToProduce(s, c, item))}${placed ? ` · ${T.choosesTile}` : ''}`),
+          h('small', { class: 'muted' }, itemDescription(item)),
         ),
         h(
           'div',
           { class: 'prod-side' },
           h(
             'button',
-            { class: 'btn', disabled: !!why, onclick: () => this.dispatch({ type: 'enqueue', cityId: c.id, item }) && reopen() },
-            T.addToQueue,
-          ),
-          h(
-            'button',
             {
               class: 'btn',
-              disabled: !!why || gold < price,
-              onclick: () => this.dispatch({ type: 'purchaseItem', cityId: c.id, item }) && reopen(),
+              disabled: !!why,
+              onclick: () => {
+                if (placed) {
+                  closeModal(host);
+                  this.startPlacement(c, item, 'enqueue');
+                } else if (this.dispatch({ type: 'enqueue', cityId: c.id, item })) reopen();
+              },
             },
-            `${price} 🪙`,
+            T.addToQueue,
           ),
+          placed
+            ? null
+            : h(
+                'button',
+                {
+                  class: 'btn',
+                  disabled: !!why || gold < price,
+                  onclick: () => this.dispatch({ type: 'purchaseItem', cityId: c.id, item }) && reopen(),
+                },
+                `${price} 🪙`,
+              ),
         ),
       );
     };
@@ -985,6 +1097,10 @@ export class App {
       ...options.filter((o) => o.kind === 'unit').map(row),
       h('label', { class: 'field-label' }, T.buildings),
       ...options.filter((o) => o.kind === 'building').map(row),
+      h('label', { class: 'field-label' }, `${T.districtsLabel} (${c.districts.length}/${districtLimit(c)})`),
+      ...options.filter((o) => o.kind === 'district').map(row),
+      h('label', { class: 'field-label' }, T.wondersLabel),
+      ...options.filter((o) => o.kind === 'wonder').map(row),
     );
     openModal(host, `${T.production} — ${c.name}`, body);
   }

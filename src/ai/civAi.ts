@@ -5,9 +5,12 @@ import { MAP_SIZES } from '../data/mapSizes';
 import { UNITS } from '../data/units';
 import type { GameEvent } from '../rules/actions';
 import { improvementFits } from '../rules/builders';
-import { cannotProduce, productionOptions, purchaseCost } from '../rules/cities';
+import { cannotProduce, cityYields, productionOptions, purchaseCost } from '../rules/cities';
 import { canFoundCity, MIN_CITY_DISTANCE } from '../rules/city';
-import { atWar, attackTargets, isRanged, previewAttack, unitRange } from '../rules/combat';
+import { atWar, attackTargets, isRanged, nextRandom, previewAttack, unitRange } from '../rules/combat';
+import { adjacencyBonus, districtSites, wonderSites } from '../rules/districts';
+import { DISTRICT_LIST } from '../data/districts';
+import { WORLD_WONDERS } from '../data/worldWonders';
 import { availableGovernments, availablePolicies, canSlotPolicy, governmentSlots } from '../rules/effects';
 import { distance, neighbors, tilesInRadius } from '../rules/hex';
 import { scoreStart } from '../rules/mapgen';
@@ -80,7 +83,55 @@ function bestMilitary(state: GameState, city: City): ProductionItem | null {
   return opts.reduce((a, b) => (UNITS[b.id].strength + (UNITS[b.id].rangedStrength ?? 0) > UNITS[a.id].strength + (UNITS[a.id].rangedStrength ?? 0) ? b : a));
 }
 
-const BUILD_ORDER = ['monument', 'granary', 'walls', 'shrine', 'library', 'watermill', 'market', 'workshop', 'lighthouse'];
+const BUILD_ORDER = [
+  'monument',
+  'granary',
+  'walls',
+  'library',
+  'shrine',
+  'watermill',
+  'market',
+  'workshop',
+  'lighthouse',
+  'barracks',
+  'university',
+  'temple',
+  'amphitheater',
+];
+
+const DISTRICT_PREF: Record<string, string[]> = {
+  scholar: ['campus'],
+  warmonger: ['encampment', 'industrial'],
+  builder: ['industrial', 'theater'],
+  merchant: ['commercial', 'harbor'],
+  expansionist: ['commercial', 'campus'],
+};
+
+function bestDistrict(state: GameState, city: City): ProductionItem | null {
+  const agenda = CIV_BY_ID[state.players[city.owner].civId]?.agenda?.id ?? '';
+  let best: ProductionItem | null = null;
+  let bestScore = 0;
+  for (const d of DISTRICT_LIST) {
+    for (const tile of districtSites(state, city, d.id)) {
+      const sc = adjacencyBonus(state, tile, d.id) + (DISTRICT_PREF[agenda]?.includes(d.id) ? 2 : 0) + (d.id === 'campus' ? 1 : 0) - tile * 1e-6;
+      if (sc > bestScore) {
+        bestScore = sc;
+        best = { kind: 'district', id: d.id, tile };
+      }
+    }
+  }
+  return best;
+}
+
+function pickWonder(state: GameState, city: City): ProductionItem | null {
+  const agenda = CIV_BY_ID[state.players[city.owner].civId]?.agenda?.id ?? '';
+  if (agenda !== 'builder' && nextRandom(state) > 0.3) return null;
+  for (const w of WORLD_WONDERS) {
+    const sites = wonderSites(state, city, w.id);
+    if (sites.length) return { kind: 'wonder', id: w.id, tile: sites[0] };
+  }
+  return null;
+}
 
 export function chooseProduction(state: GameState, city: City): ProductionItem | null {
   const id = city.owner;
@@ -109,10 +160,20 @@ export function chooseProduction(state: GameState, city: City): ProductionItem |
   const builders = count(state, id, (u) => u.type === 'builder');
   if (builders < Math.ceil(myCities / 2) && can({ kind: 'unit', id: 'builder' })) return { kind: 'unit', id: 'builder' };
   if (count(state, id, (u) => u.type === 'scout') === 0 && state.turn < 30 && can({ kind: 'unit', id: 'scout' })) return { kind: 'unit', id: 'scout' };
+  // distritos: o de maior adjacência (com preferência da agenda)
+  const district = bestDistrict(state, city);
+  if (district) return district;
+  // cidades produtivas tentam maravilhas antes dos edifícios tardios
+  if (city.buildings.length >= 3 && cityYields(state, city).production >= 6) {
+    const w = pickWonder(state, city);
+    if (w) return w;
+  }
   for (const b of BUILD_ORDER) {
     if (b === 'walls' && !atWarNow && city.population < 4) continue;
     if (BUILDINGS[b] && can(building(b))) return building(b);
   }
+  const wonder = pickWonder(state, city);
+  if (wonder) return wonder;
   return bestMilitary(state, city) ?? (can(settlerItem) ? settlerItem : null);
 }
 

@@ -25,6 +25,10 @@ export interface Tile {
   /** id em data/improvements */
   improvement?: string;
   road?: boolean;
+  /** Distrito construído (id em data/districts). */
+  district?: string;
+  /** Maravilha mundial construída (id em data/worldWonders). */
+  builtWonder?: string;
 }
 
 export interface GameMap {
@@ -89,8 +93,10 @@ export interface BarbarianCamp {
 }
 
 export interface ProductionItem {
-  kind: 'unit' | 'building';
+  kind: 'unit' | 'building' | 'district' | 'wonder';
   id: string;
+  /** Hexágono escolhido (distritos e maravilhas). */
+  tile?: number;
 }
 
 export type CityFocus = 'balanced' | 'food' | 'production' | 'gold';
@@ -120,6 +126,8 @@ export interface City {
   hp: number;
   /** Já usou o ataque à distância neste turno. */
   rangedUsed?: boolean;
+  districts: { type: string; pos: number }[];
+  wonders: string[];
 }
 
 export interface Player {

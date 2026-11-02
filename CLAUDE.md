@@ -26,7 +26,8 @@ Pré-requisito (uma vez): Settings → Pages → Source = **GitHub Actions**.
 ```
 src/
   data/    Definições de conteúdo (terrenos, características, recursos, maravilhas, unidades,
-           edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas, promoções,
+           edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas, promoções, distritos,
+           maravilhas mundiais, cidades-estado,
            civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
   state/   Tipos do estado serializável (types.ts), versão do esquema (version.ts) e
            salvar/carregar com migrações (save.ts).
@@ -39,6 +40,7 @@ src/
            políticas e agregação de modificadores), combat.ts (força, dano, ataques, ZOC,
            cidades, cura, promoções), barbarians.ts (acampamentos e comportamento bárbaro —
            NPC determinístico, fica em rules/; a IA de civilizações rivais fica em ai/),
+           districts.ts (distritos, adjacência, maravilhas mundiais, habilidades únicas),
            diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
            suseranos, território fechado, eliminação),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
@@ -52,7 +54,8 @@ src/
   main.ts  Ponto de entrada; registra o service worker em produção.
 public/    manifest.webmanifest, sw.js (offline), ícones.
 tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save, cidades,
-           construtores, pesquisa/políticas, combate/bárbaros, diplomacia/IA). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
+           construtores, pesquisa/políticas, combate/bárbaros, diplomacia/IA, distritos/maravilhas).
+           tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
 ```
 
 ### Convenções
@@ -204,6 +207,30 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   guerra, guarnecem cidades; batedores exploram. Declara guerra só se hostil, vizinha,
   turno ≥ 40 e 1,4× mais forte (chance pela agressividade do líder).
 
+### Distritos, maravilhas e habilidades (etapa 6)
+
+- Itens de produção com hexágono: `{ kind: 'district' | 'wonder', id, tile }`. O hexágono é
+  escolhido na UI (modo de posicionamento) e fica reservado enquanto estiver na fila.
+- Distritos (`data/districts.ts`): Campus, Lugar Sagrado, Praça Teatral, Centro Comercial,
+  Zona Industrial, Acampamento Militar, Porto (na costa). Custo 60. Limite por cidade:
+  `1 + ⌊(pop−1)/3⌋`. Hexágono do território (raio 3), não centro, sem maravilha/distrito,
+  sem recurso de luxo/estratégico; vira não trabalhável e perde melhoria/característica.
+- Adjacência (frações somadas e arredondadas para baixo): montanha, selva, floresta,
+  maravilha natural/mundial, distrito/centro de cidade, rio, mina, pedreira, recurso marinho.
+- Edifícios com `district` exigem o distrito (Biblioteca/Universidade → Campus, Santuário/
+  Templo → Lugar Sagrado, Mercado → Centro Comercial, Oficina → Zona Industrial, Farol →
+  Porto, Quartel → Acampamento, Anfiteatro → Praça Teatral); `requiresBuilding` encadeia
+  (Universidade exige Biblioteca). Saves antigos mantêm os edifícios já construídos.
+- Acampamento Militar: +25% de produção militar e +10 XP; Quartel: +15 XP.
+- Maravilhas mundiais (`data/worldWonders.ts`, 11, todas inventadas): posicionamento por
+  regra (rio, costa, colinas, deserto, junto a montanha ou a distrito), rendimento na cidade
+  e `effects` para o dono (agregados em `modifiersFor`). Só uma no mundo: ao ser concluída,
+  sai da fila das outras cidades. Distritos e maravilhas não podem ser comprados.
+- Novo efeito `cityDefense` (Muralha Eterna).
+- Habilidades únicas: Valdória +2 ouro em cidades ligadas à capital por estrada; Tamaru +1
+  ciência em hexágonos com rio; Norvhal +1 produção em tundra/neve; Qasmira +1 ouro e +1 fé
+  em deserto; Yrkaan +1 movimento para unidades que estão em planície.
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),
@@ -219,7 +246,7 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    promoções, acampamentos bárbaros, captura de cidades, muralhas.
 5. **[CONCLUÍDA] IA e diplomacia** — civilizações rivais (`src/ai`), múltiplos jogadores no turno,
    primeiro contato, guerra/paz, acordos, agendas dos líderes, cidades-estado.
-6. **Distritos e maravilhas** — distritos especializados com bônus de adjacência, edifícios,
+6. **[CONCLUÍDA] Distritos e maravilhas** — distritos especializados com bônus de adjacência, edifícios,
    maravilhas mundiais, habilidades únicas das civilizações (já descritas em `data/civs.ts`).
 7. **Economia e sociedade** — ouro/manutenção, amenidades e recursos de luxo, comércio e rotas,
    religião/fé, grandes personagens, unidades navais e exploração marítima.
@@ -227,6 +254,20 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 6 (concluída)
+- Save v6 (migração 5→6: `districts` e `wonders` nas cidades; `district`/`builtWonder` nos
+  hexágonos são opcionais).
+- Dados: 7 distritos, 4 edifícios novos (Universidade, Templo, Anfiteatro, Quartel), 11
+  maravilhas mundiais; edifícios existentes passam a exigir distrito.
+- Regras: posicionamento, limite, adjacência, maravilhas exclusivas, habilidades únicas.
+- IA escolhe distritos pela maior adjacência (com preferência da agenda) e tenta
+  maravilhas em cidades produtivas.
+- UI: seções Distritos/Maravilhas na produção; modo de escolha do hexágono com bônus de
+  adjacência no mapa (1º toque escolhe, 2º toque ou "Confirmar"); distritos e maravilhas
+  desenhados no mapa; aviso global quando alguém conclui uma maravilha.
+- Pendências: custo de distrito não escala com a era; sem especialistas nos distritos;
+  sem rotas comerciais (etapa 7).
 
 ### Etapa 5 (concluída)
 - Save v5 (migração 4→5: `diplomacy`, `proposals`, `envoyTokens`).

@@ -5,6 +5,26 @@ import { UNIT_ORDER, UNITS, type UnitDef } from '../data/units';
 import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/types';
 import { distance, neighbors, tilesInRadius } from './hex';
+import { CIVIC_BY_ID } from '../data/civics';
+import { DISTRICT_LIST, DISTRICTS, type DistrictId } from '../data/districts';
+import { WORLD_WONDER_BY_ID, WORLD_WONDERS } from '../data/worldWonders';
+import {
+  abilityCityBonus,
+  abilityTileBonus,
+  cannotBuildDistrict,
+  cannotBuildWonder,
+  cannotPlaceDistrict,
+  cannotPlaceWonder,
+  completeDistrict,
+  completeWonder,
+  districtCost,
+  districtSites,
+  districtYields,
+  hasDistrict,
+  wonderCityYields,
+  wonderOwner,
+  wonderSites,
+} from './districts';
 import { modifiersFor } from './effects';
 import { isPassableLand, isWater, tileYields as rawTileYields, visibleResource } from './tiles';
 import type { Tile } from '../state/types';
@@ -38,7 +58,10 @@ function ownerTechs(state: GameState, city: City): readonly string[] {
 
 /** Rendimento de um hexágono do ponto de vista do dono da cidade. */
 export function cityTileYields(state: GameState, city: City, t: Tile): Yields {
-  return rawTileYields(t, ownerTechs(state, city));
+  const y = rawTileYields(t, ownerTechs(state, city));
+  const bonus = abilityTileBonus(state.players[city.owner]?.civId, t);
+  if (bonus) addYields(y, bonus);
+  return y;
 }
 
 function visibleResourceFor(state: GameState, city: City, t: Tile): string | undefined {
@@ -77,6 +100,9 @@ export function cityYields(state: GameState, city: City): Yields {
   for (const i of city.worked) addYields(y, cityTileYields(state, city, state.map.tiles[i]));
   addYields(y, buildingYields(city));
   addYields(y, citizenYields(city));
+  addYields(y, districtYields(state, city));
+  addYields(y, wonderCityYields(city));
+  addYields(y, abilityCityBonus(state, city));
   const m = modifiersFor(state, city.owner);
   addYields(y, m.cityYields);
   if (city.isCapital) addYields(y, m.capitalYields);
@@ -136,6 +162,7 @@ export function workableTiles(state: GameState, city: City): number[] {
   return tilesInRadius(state.map, city.pos, CITY_WORK_RADIUS).filter((i) => {
     const t = state.map.tiles[i];
     if (i === city.pos || t.cityId !== city.id) return false;
+    if (t.district || t.builtWonder) return false;
     if (state.cities.some((c) => c.pos === i)) return false;
     return true;
   });
@@ -206,19 +233,46 @@ export function itemKey(item: ProductionItem): string {
 }
 
 export function itemDef(item: ProductionItem): UnitDef | BuildingDef | undefined {
-  return item.kind === 'unit' ? UNITS[item.id] : BUILDINGS[item.id];
+  return item.kind === 'unit' ? UNITS[item.id] : item.kind === 'building' ? BUILDINGS[item.id] : undefined;
 }
 
 export function itemCost(item: ProductionItem): number {
+  if (item.kind === 'district') return districtCost();
+  if (item.kind === 'wonder') return WORLD_WONDER_BY_ID[item.id]?.cost ?? 0;
   return itemDef(item)?.cost ?? 0;
 }
 
 export function itemName(item: ProductionItem): string {
+  if (item.kind === 'district') return DISTRICTS[item.id as DistrictId]?.name ?? item.id;
+  if (item.kind === 'wonder') return WORLD_WONDER_BY_ID[item.id]?.name ?? item.id;
   return itemDef(item)?.name ?? item.id;
+}
+
+export function itemDescription(item: ProductionItem): string {
+  if (item.kind === 'district') return DISTRICTS[item.id as DistrictId]?.description ?? '';
+  if (item.kind === 'wonder') return WORLD_WONDER_BY_ID[item.id]?.description ?? '';
+  return itemDef(item)?.description ?? '';
 }
 
 /** Por que a cidade não pode produzir o item (ou null se pode). */
 export function cannotProduce(state: GameState, city: City, item: ProductionItem): string | null {
+  if (item.kind === 'district') {
+    if (item.tile !== undefined) {
+      // já na fila: o hexágono reservado é o próprio item
+      const queued = city.queue.some((q) => q.kind === 'district' && q.id === item.id && q.tile === item.tile);
+      if (queued) return null;
+      return cannotPlaceDistrict(state, city, item.id, item.tile);
+    }
+    return cannotBuildDistrict(state, city, item.id) ?? (districtSites(state, city, item.id).length ? null : 'Sem hexágono válido.');
+  }
+  if (item.kind === 'wonder') {
+    if (item.tile !== undefined) {
+      const queued = city.queue.some((q) => q.kind === 'wonder' && q.id === item.id && q.tile === item.tile);
+      if (queued) return wonderOwner(state, item.id) ? 'Já construída por outra cidade.' : null;
+      return cannotPlaceWonder(state, city, item.id, item.tile);
+    }
+    return cannotBuildWonder(state, city, item.id) ?? (wonderSites(state, city, item.id).length ? null : 'Sem hexágono válido.');
+  }
   if (item.kind === 'unit') {
     const def = UNITS[item.id];
     if (!def || def.barbarianOnly) return 'Unidade desconhecida.';
@@ -236,7 +290,16 @@ export function cannotProduce(state: GameState, city: City, item: ProductionItem
   if (def.requiresTech && !ownerTechs(state, city).includes(def.requiresTech)) {
     return `Exige ${TECH_BY_ID[def.requiresTech]?.name ?? def.requiresTech}.`;
   }
+  if (def.requiresCivic && !state.players[city.owner].civics.includes(def.requiresCivic)) {
+    return `Exige ${CIVIC_BY_ID[def.requiresCivic]?.name ?? def.requiresCivic}.`;
+  }
   if (city.buildings.includes(item.id)) return 'Já construído.';
+  if (def.district && !hasDistrict(city, def.district) && !city.buildings.includes(item.id)) {
+    return `Exige o distrito ${DISTRICTS[def.district as DistrictId]?.name ?? def.district}.`;
+  }
+  if (def.requiresBuilding && !city.buildings.includes(def.requiresBuilding)) {
+    return `Exige ${BUILDINGS[def.requiresBuilding]?.name ?? def.requiresBuilding}.`;
+  }
   if (def.needsRiver && !hasFreshWater(state, city)) return 'Exige rio no centro da cidade.';
   if (def.needsCoast && !isCoastalCity(state, city)) return 'Exige cidade costeira.';
   return null;
@@ -255,7 +318,11 @@ export function productionOptions(state: GameState, city: City): ProductionItem[
     .filter((b) => !b.auto && !city.buildings.includes(b.id))
     .filter((b) => (!b.needsRiver || hasFreshWater(state, city)) && (!b.needsCoast || isCoastalCity(state, city)))
     .map((b) => ({ kind: 'building', id: b.id }));
-  return [...units, ...buildings];
+  const districts: ProductionItem[] = DISTRICT_LIST.filter(
+    (d) => !hasDistrict(city, d.id) && !city.queue.some((q) => q.kind === 'district' && q.id === d.id),
+  ).map((d) => ({ kind: 'district', id: d.id }));
+  const wonders: ProductionItem[] = WORLD_WONDERS.filter((w) => !wonderOwner(state, w.id)).map((w) => ({ kind: 'wonder', id: w.id }));
+  return [...units, ...buildings, ...districts, ...wonders];
 }
 
 /** Bônus percentual de produção (políticas/governo) para o item. */
@@ -263,9 +330,10 @@ export function productionBonus(state: GameState, city: City, item: ProductionIt
   const m = modifiersFor(state, city.owner).productionPercent;
   let pct = m.all;
   if (item.kind === 'building') pct += m.building;
-  else {
+  else if (item.kind === 'unit') {
     const def = UNITS[item.id];
     if (def?.class === 'military') pct += m.military;
+    if (def?.class === 'military' && hasDistrict(city, 'encampment')) pct += 25;
     if (item.id === 'settler') pct += m.settler;
     if (item.id === 'builder') pct += m.builder;
   }
@@ -314,6 +382,10 @@ export function completeItem(state: GameState, city: City, item: ProductionItem)
     if (pos === null) return null;
     const u: Unit = { id: state.nextId++, type: def.id, owner: city.owner, pos, movesLeft: 0, hp: 100, xp: 0, promotions: [] };
     if (def.charges) u.charges = def.charges + modifiersFor(state, city.owner).builderCharges;
+    if (def.class === 'military') {
+      if (hasDistrict(city, 'encampment')) u.xp += 10;
+      if (city.buildings.includes('barracks')) u.xp += 15;
+    }
     state.units.push(u);
     if (def.popCost) {
       city.population = Math.max(1, city.population - def.popCost);
@@ -322,13 +394,32 @@ export function completeItem(state: GameState, city: City, item: ProductionItem)
     }
     return { type: 'produced', cityId: city.id, item, unitId: u.id };
   }
+  if (item.kind === 'district') {
+    if (item.tile === undefined || cannotPlaceDistrictOnComplete(state, city, item)) return null;
+    completeDistrict(state, city, item.id, item.tile);
+    assignCitizens(state, city);
+    return { type: 'produced', cityId: city.id, item };
+  }
+  if (item.kind === 'wonder') {
+    if (item.tile === undefined || wonderOwner(state, item.id)) return null;
+    completeWonder(state, city, item.id, item.tile);
+    assignCitizens(state, city);
+    return { type: 'produced', cityId: city.id, item };
+  }
   city.buildings.push(item.id);
   if (item.id === 'walls') city.hp += 100; // muralhas chegam com a vida extra cheia
   assignCitizens(state, city);
   return { type: 'produced', cityId: city.id, item };
 }
 
+/** O hexágono do distrito ainda é válido na conclusão? (pode ter sido perdido) */
+function cannotPlaceDistrictOnComplete(state: GameState, city: City, item: ProductionItem): boolean {
+  const t = state.map.tiles[item.tile!];
+  return !t || t.cityId !== city.id || !!t.district || !!t.builtWonder;
+}
+
 export function purchaseItem(state: GameState, city: City, item: ProductionItem): string | null {
+  if (item.kind === 'district' || item.kind === 'wonder') return 'Distritos e maravilhas não podem ser comprados.';
   const why = cannotProduce(state, city, item);
   if (why) return why;
   const player = state.players[city.owner];
