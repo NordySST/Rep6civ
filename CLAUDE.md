@@ -26,7 +26,7 @@ Pré-requisito (uma vez): Settings → Pages → Source = **GitHub Actions**.
 ```
 src/
   data/    Definições de conteúdo (terrenos, características, recursos, maravilhas, unidades,
-           edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas,
+           edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas, promoções,
            civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
   state/   Tipos do estado serializável (types.ts), versão do esquema (version.ts) e
            salvar/carregar com migrações (save.ts).
@@ -36,7 +36,9 @@ src/
            cities.ts (gestão: rendimentos, cidadãos, crescimento, moradia, produção, cultura,
            fronteiras, compras), builders.ts (melhorias, estradas, remoção de características),
            research.ts (tecnologias, cívicas, eurecas/inspirações), effects.ts (governo,
-           políticas e agregação de modificadores),
+           políticas e agregação de modificadores), combat.ts (força, dano, ataques, ZOC,
+           cidades, cura, promoções), barbarians.ts (acampamentos e comportamento bárbaro —
+           NPC determinístico, fica em rules/; a IA de civilizações rivais fica em ai/),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom) e renderer.ts (arte procedural).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
@@ -45,7 +47,7 @@ src/
   main.ts  Ponto de entrada; registra o service worker em produção.
 public/    manifest.webmanifest, sw.js (offline), ícones.
 tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save, cidades,
-           construtores, pesquisa/políticas). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
+           construtores, pesquisa/políticas, combate/bárbaros). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
 ```
 
 ### Convenções
@@ -134,6 +136,35 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   `rules/effects.ts` e aplicados em `cityYields`, produção, crescimento, compra de hexágonos,
   cargas de construtor e `maxMoves`.
 
+### Combate (etapa 4)
+
+- Vida: unidades 100, cidades 200 (+100 com Muralhas). Dano = `30·e^((A−D)/25)·[0,8–1,2]`
+  (máx. 100). Ferimentos: −1 de força a cada 10% de vida perdida. Sorteios usam
+  `createRng(seed|combat|rngCounter)` e incrementam `state.rngCounter` (determinístico).
+- Defesa: colinas +3, floresta/selva +3, pântano −2, fortificado +6; atacar corpo a corpo
+  através de rio −5; `bonusVs` por tipo (lanceiro +10 vs cavalaria, catapulta +15 vs cidade);
+  unidades à distância comuns têm −10 contra cidades.
+- Corpo a corpo: ambos sofrem dano; se o defensor morre, o atacante avança (captura civis
+  restantes). Civis indefesos são capturados sem combate (colono vira construtor; bárbaros
+  destroem). À distância: sem retaliação, alcance por `range` (+promoções), alvo visível.
+  Atacar encerra o movimento. XP: 5 corpo a corpo, 3 à distância, 3 ao defender.
+- Cidade: força `15 + 2·pop + 8 muralhas + 3 capital + 3 colinas + guarnição/4`.
+  Com Muralhas ataca à distância (alcance 2) uma vez por turno. Vida 0 + ataque corpo a
+  corpo de uma civilização = captura (perde Palácio/Muralhas e 1 pop). Bárbaros não
+  capturam. Cidades curam 20/turno.
+- ZOC: unidades militares e cidades inimigas controlam os hexágonos adjacentes; mover de
+  um hexágono sob ZOC para outro sob ZOC consome todo o movimento.
+- Cura (quem não agiu no turno): 10 neutro, 20 próprio território, 25 em cidade, 5 em
+  território inimigo, + promoções. Promoção (XP 15/45/90/150/240) cura 50 e encerra o turno.
+- Unidades: Fundibulário, Arqueiro (Arquearia), Lanceiro e Espadachim (Bronze; Espadachim
+  exige Ferro no território), Cavaleiro (Equitação + Cavalos), Catapulta (Engenharia).
+- Guerra: `atWar` — por enquanto só contra bárbaros (diplomacia na etapa 5).
+- Bárbaros: jogador especial `isBarbarian` (sem cidades/pesquisa). Acampamentos fora da
+  vista e a ≥ 7 de cidades; geram unidade a cada 7–11 turnos (máx. 3 por acampamento),
+  tipo conforme o turno; novo acampamento a cada 20 turnos até o limite do mapa. Atacam
+  alvos a até 6 hexágonos (preferem civis), senão vagueiam perto do acampamento. Entrar
+  num acampamento com unidade militar o destrói: +25 ouro. Agem no fim do turno do jogador.
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),
@@ -145,7 +176,7 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    construtores e melhorias (fazenda, mina, pastagem…), estradas, painel da cidade.
 3. **[CONCLUÍDA] Ciência e cultura** — árvore de tecnologias e de cívicas, revelação de recursos estratégicos
    (`revealedBy`), governos e cartas de política, eurekas/inspirações.
-4. **Combate** — força, dano, ZOC, bônus de terreno/rio/fortificação, unidades à distância,
+4. **[CONCLUÍDA] Combate** — força, dano, ZOC, bônus de terreno/rio/fortificação, unidades à distância,
    promoções, acampamentos bárbaros, captura de cidades, muralhas.
 5. **IA e diplomacia** — civilizações rivais (`src/ai`), múltiplos jogadores no turno,
    primeiro contato, guerra/paz, acordos, agendas dos líderes, cidades-estado.
@@ -157,6 +188,18 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 4 (concluída)
+- Save v4 (migração 3→4: vida/XP/promoções das unidades, vida das cidades, jogador
+  bárbaro, `camps`, `rngCounter`).
+- Regras de combate, ZOC, cura, promoções, captura de civis e cidades, Muralhas e ataque
+  da cidade, bárbaros (acampamentos, geração, comportamento), unidades militares novas com
+  requisito de tecnologia e de recurso estratégico.
+- UI: alvos em vermelho ao selecionar unidade/cidade; 1º toque mostra a previsão (forças e
+  dano), 2º toque ou "Atacar" confirma; barras de vida; ★ quando há promoção; modal de
+  promoções; acampamentos no mapa; inspeção de unidades inimigas; avisos de combate.
+- Pendências: sem animações de combate; sem flanqueamento/apoio; bárbaros não saqueiam
+  melhorias; unidades navais na etapa 7.
 
 ### Etapa 3 (concluída)
 - Save v3 (migração 2→3: pesquisa, cívicas, eurecas, governo e políticas no jogador).
