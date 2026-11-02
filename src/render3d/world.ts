@@ -170,9 +170,9 @@ export function buildWater(field: TerrainField, mat: THREE.Material): THREE.Grou
 export function buildRivers(field: TerrainField, state: GameState, mat: THREE.Material): THREE.Mesh | null {
   const pos: number[] = [];
   const col: number[] = [];
-  const blue = linear('#3f8fc6');
-  const SEG = 6;
-  const W = 6.5;
+  const blue = linear('#4a9bd0');
+  const SEG = 10;
+  const W = 8;
   state.map.tiles.forEach((t, i) => {
     if (!t.rivers) return;
     const c = tileCenter(state, i);
@@ -193,7 +193,7 @@ export function buildRivers(field: TerrainField, state: GameState, mat: THREE.Ma
         const tt = -0.06 + (k / SEG) * 1.12;
         const x = a.x + ex * tt;
         const z = a.y + ey * tt;
-        const y = Math.max(field.height(x, z) + 1.1, WATER_LEVEL + 0.15);
+        const y = Math.max(field.height(x, z) + 0.8, WATER_LEVEL + 0.15);
         const cur = [x + px, y, z + py, x - px, y, z - py];
         if (prev) {
           pos.push(...prev.slice(0, 3), ...cur.slice(0, 3), ...prev.slice(3, 6));
