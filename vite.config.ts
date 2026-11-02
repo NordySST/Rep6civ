@@ -7,6 +7,8 @@ export default defineConfig({
     outDir: 'dist',
     target: 'es2022',
     sourcemap: false,
+    // o módulo 3D (three.js) é carregado sob demanda num pedaço próprio (~600 kB)
+    chunkSizeWarningLimit: 700,
   },
   test: {
     include: ['tests/**/*.test.ts'],

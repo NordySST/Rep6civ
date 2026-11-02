@@ -471,3 +471,13 @@ button.turn-info { color: var(--text); font: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .turn-banner { display: none; }
 }
+
+/* ---------- mapa 3D ---------- */
+.map-gl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}

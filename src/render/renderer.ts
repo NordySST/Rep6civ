@@ -11,6 +11,7 @@ import type { GameState, Tile } from '../state/types';
 import { tileYields, visibleResource } from '../rules/tiles';
 import { colRow, hexCorner, hexToPixel, neighbor, pixelToOffset, SQRT3 } from '../rules/hex';
 import { type Camera, screenToWorld, worldToScreen } from './camera';
+import type { MapView } from './view';
 
 /** Raio do hexágono em unidades de mundo. */
 export const HEX_SIZE = 32;
@@ -117,9 +118,10 @@ function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: nu
   ctx.closePath();
 }
 
-export class Renderer {
+export class Renderer implements MapView {
+  readonly kind = '2d';
   readonly ctx: CanvasRenderingContext2D;
-  private dpr = 1;
+  dpr = 1;
   vw = 0;
   vh = 0;
 
@@ -236,26 +238,7 @@ export class Renderer {
     this.drawRoads(state, visibleIdx, isKnown);
 
     // melhorias
-    if (detail) {
-      for (const i of visibleIdx) {
-        const t = state.map.tiles[i];
-        if (t.improvement) {
-          const c = tileCenter(state, i);
-          this.drawImprovement(t.improvement as ImprovementId, c);
-          if (t.pillaged) {
-            ctx.strokeStyle = '#e74c3c';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(c.x - 10, c.y);
-            ctx.lineTo(c.x + 10, c.y + 18);
-            ctx.moveTo(c.x + 10, c.y);
-            ctx.lineTo(c.x - 10, c.y + 18);
-            ctx.stroke();
-          }
-        }
-      }
-    }
-
+    if (detail) this.drawImprovements(state, visibleIdx);
 
     // recursos e maravilhas
     if (detail) {
@@ -272,18 +255,7 @@ export class Renderer {
     }
 
     // área alcançável
-    if (overlay.reachable?.size) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.lineWidth = 1.5;
-      for (const i of overlay.reachable) {
-        if (!isKnown(i)) continue;
-        const { x, y } = tileCenter(state, i);
-        hexPath(ctx, x, y, HEX_SIZE - 3);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
+    this.drawReachable(state, overlay, isKnown);
 
     // distritos e maravilhas construídos
     for (const i of visibleIdx) {
@@ -299,42 +271,10 @@ export class Renderer {
     }
 
     // locais válidos para distrito/maravilha
-    if (overlay.placement) {
-      for (const [i, label] of overlay.placement.sites) {
-        const { x, y } = tileCenter(state, i);
-        const chosen = overlay.placement.chosen === i;
-        ctx.fillStyle = chosen ? 'rgba(80, 220, 255, 0.35)' : 'rgba(80, 220, 255, 0.15)';
-        ctx.strokeStyle = chosen ? '#5ff' : 'rgba(80, 220, 255, 0.9)';
-        ctx.lineWidth = chosen ? 4 : 2.5;
-        hexPath(ctx, x, y, HEX_SIZE - 3);
-        ctx.fill();
-        ctx.stroke();
-        if (label) {
-          ctx.font = '700 12px system-ui, sans-serif';
-          const tw = ctx.measureText(label).width + 10;
-          ctx.fillStyle = 'rgba(5, 30, 40, 0.9)';
-          roundRect(ctx, x - tw / 2, y - 22, tw, 15, 6);
-          ctx.fill();
-          ctx.fillStyle = '#9ff';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(label, x, y - 14.5);
-        }
-      }
-    }
+    this.drawPlacement(state, overlay);
 
     // alvos de ataque
-    if (overlay.attackTargets?.size) {
-      for (const i of overlay.attackTargets) {
-        const { x, y } = tileCenter(state, i);
-        ctx.strokeStyle = i === overlay.pendingAttack ? '#ff3b30' : 'rgba(255, 80, 60, 0.85)';
-        ctx.lineWidth = i === overlay.pendingAttack ? 4 : 2.5;
-        ctx.fillStyle = 'rgba(255, 60, 40, 0.16)';
-        hexPath(ctx, x, y, HEX_SIZE - 3);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
+    this.drawAttackTargets(state, overlay);
 
     // fronteiras (acima da névoa e do destaque de alcance)
     this.drawBorders(state, visibleIdx);
@@ -415,34 +355,271 @@ export class Renderer {
     for (const pr of overlay.projectiles ?? []) this.drawProjectile(pr);
 
     // textos flutuantes
-    for (const f of overlay.floaters ?? []) {
-      ctx.globalAlpha = Math.max(0, f.alpha);
-      ctx.font = `800 ${Math.round(f.size ?? 14)}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-      ctx.strokeText(f.text, f.x, f.y);
-      ctx.fillStyle = f.color;
-      ctx.fillText(f.text, f.x, f.y);
-      ctx.globalAlpha = 1;
-    }
+    for (const f of overlay.floaters ?? []) this.drawFloater(f);
 
     // caminho planejado
-    if (overlay.path?.length && overlay.selectedUnitId !== undefined) {
-      const unit = state.units.find((u) => u.id === overlay.selectedUnitId);
-      if (unit) this.drawPath(state, unit.pos, overlay.path, overlay.pathTurns ?? 1);
-    }
+    this.drawPlannedPath(state, overlay);
 
     // hexágono selecionado
-    if (overlay.selectedTile !== undefined && overlay.selectedTile >= 0) {
-      const { x, y } = tileCenter(state, overlay.selectedTile);
-      ctx.strokeStyle = '#ffe680';
-      ctx.lineWidth = 3;
-      hexPath(ctx, x, y, HEX_SIZE - 2);
+    this.drawSelectedTile(state, overlay);
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  // ------------------------------------------------------------------ camadas reaproveitadas pela visão 3D
+
+  private drawImprovements(state: GameState, idxs: number[]): void {
+    const { ctx } = this;
+    for (const i of idxs) {
+      const t = state.map.tiles[i];
+      if (!t.improvement) continue;
+      const c = tileCenter(state, i);
+      this.drawImprovement(t.improvement as ImprovementId, c);
+      if (t.pillaged) {
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(c.x - 10, c.y);
+        ctx.lineTo(c.x + 10, c.y + 18);
+        ctx.moveTo(c.x + 10, c.y);
+        ctx.lineTo(c.x - 10, c.y + 18);
+        ctx.stroke();
+      }
+    }
+  }
+
+  private drawReachable(state: GameState, overlay: Overlay, isKnown: (i: number) => boolean): void {
+    if (!overlay.reachable?.size) return;
+    const { ctx } = this;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 1.5;
+    for (const i of overlay.reachable) {
+      if (!isKnown(i)) continue;
+      const { x, y } = tileCenter(state, i);
+      hexPath(ctx, x, y, HEX_SIZE - 3);
+      ctx.fill();
       ctx.stroke();
     }
+  }
 
+  private drawPlacement(state: GameState, overlay: Overlay): void {
+    if (!overlay.placement) return;
+    const { ctx } = this;
+    for (const [i, label] of overlay.placement.sites) {
+      const { x, y } = tileCenter(state, i);
+      const chosen = overlay.placement.chosen === i;
+      ctx.fillStyle = chosen ? 'rgba(80, 220, 255, 0.35)' : 'rgba(80, 220, 255, 0.15)';
+      ctx.strokeStyle = chosen ? '#5ff' : 'rgba(80, 220, 255, 0.9)';
+      ctx.lineWidth = chosen ? 4 : 2.5;
+      hexPath(ctx, x, y, HEX_SIZE - 3);
+      ctx.fill();
+      ctx.stroke();
+      if (label) {
+        ctx.font = '700 12px system-ui, sans-serif';
+        const tw = ctx.measureText(label).width + 10;
+        ctx.fillStyle = 'rgba(5, 30, 40, 0.9)';
+        roundRect(ctx, x - tw / 2, y - 22, tw, 15, 6);
+        ctx.fill();
+        ctx.fillStyle = '#9ff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x, y - 14.5);
+      }
+    }
+  }
+
+  private drawAttackTargets(state: GameState, overlay: Overlay): void {
+    if (!overlay.attackTargets?.size) return;
+    const { ctx } = this;
+    for (const i of overlay.attackTargets) {
+      const { x, y } = tileCenter(state, i);
+      ctx.strokeStyle = i === overlay.pendingAttack ? '#ff3b30' : 'rgba(255, 80, 60, 0.85)';
+      ctx.lineWidth = i === overlay.pendingAttack ? 4 : 2.5;
+      ctx.fillStyle = 'rgba(255, 60, 40, 0.16)';
+      hexPath(ctx, x, y, HEX_SIZE - 3);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  private drawSelectedTile(state: GameState, overlay: Overlay): void {
+    if (overlay.selectedTile === undefined || overlay.selectedTile < 0) return;
+    const { ctx } = this;
+    const { x, y } = tileCenter(state, overlay.selectedTile);
+    ctx.strokeStyle = '#ffe680';
+    ctx.lineWidth = 3;
+    hexPath(ctx, x, y, HEX_SIZE - 2);
+    ctx.stroke();
+  }
+
+  private drawPlannedPath(state: GameState, overlay: Overlay): void {
+    if (!overlay.path?.length || overlay.selectedUnitId === undefined) return;
+    const unit = state.units.find((u) => u.id === overlay.selectedUnitId);
+    if (unit) this.drawPath(state, unit.pos, overlay.path, overlay.pathTurns ?? 1);
+  }
+
+  private drawFloater(f: { x: number; y: number; text: string; color: string; alpha: number; size?: number }): void {
+    const { ctx } = this;
+    ctx.globalAlpha = Math.max(0, f.alpha);
+    ctx.font = `800 ${Math.round(f.size ?? 14)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(f.text, f.x, f.y);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Visão 3D — camada do chão: desenha num canvas de textura, em coordenadas de mundo da
+   * região `r` (x, y, largura, altura em unidades de mundo; `scale` pixels por unidade), o
+   * que fica "pintado" no terreno: estradas, melhorias, alcance, alvos, fronteiras, visão da
+   * cidade, caminho e seleção. Nos mapas com volta, desenha também as cópias vizinhas.
+   */
+  drawDecal(state: GameState, vis: Uint8Array, overlay: Overlay, r: { x: number; y: number; w: number; h: number; scale: number }): void {
+    const { ctx } = this;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const explored = state.players[state.currentPlayer].explored;
+    const isKnown = (i: number) => overlay.revealAll || explored[i] === 1;
+    const P = worldPeriod(state);
+    const shifts = state.map.wrap ? [-P, 0, P] : [0];
+    const rowH = HEX_SIZE * 1.5;
+    const colW = HEX_SIZE * SQRT3;
+    for (const sh of shifts) {
+      const x0 = r.x - sh;
+      const x1 = r.x + r.w - sh;
+      if (state.map.wrap && (x1 < -colW || x0 > P + colW)) continue;
+      ctx.setTransform(r.scale, 0, 0, r.scale, (sh - r.x) * r.scale, -r.y * r.scale);
+      const r0 = Math.max(0, Math.floor(r.y / rowH) - 1);
+      const r1 = Math.min(state.map.height - 1, Math.ceil((r.y + r.h) / rowH) + 1);
+      const c0 = Math.max(0, Math.floor(x0 / colW) - 1);
+      const c1 = Math.min(state.map.width - 1, Math.ceil(x1 / colW) + 1);
+      const idxs: number[] = [];
+      for (let row = r0; row <= r1; row++) for (let col = c0; col <= c1; col++) {
+        const i = row * state.map.width + col;
+        if (isKnown(i)) idxs.push(i);
+      }
+      this.drawRoads(state, idxs, isKnown);
+      this.drawImprovements(state, idxs);
+      this.drawReachable(state, overlay, isKnown);
+      this.drawPlacement(state, overlay);
+      this.drawAttackTargets(state, overlay);
+      this.drawBorders(state, idxs);
+      if (overlay.cityView) this.drawCityView(state, overlay.cityView);
+      this.drawPlannedPath(state, overlay);
+      this.drawSelectedTile(state, overlay);
+    }
+    void vis;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  /**
+   * Visão 3D — figuras "em pé" sobre o relevo (ícones, estandartes, unidades, efeitos),
+   * desenhadas com a mesma arte do 2D. `place(x, y)` posiciona o contexto para que
+   * desenhar em (x, y) de mundo caia no ponto projetado; devolve false fora da tela.
+   */
+  drawSprites(
+    state: GameState,
+    vis: Uint8Array,
+    overlay: Overlay,
+    tiles: number[],
+    place: (wx: number, wy: number) => boolean,
+    zoom: number,
+  ): void {
+    const { ctx } = this;
+    const playerId = state.currentPlayer;
+    const explored = state.players[playerId].explored;
+    const techs = state.players[playerId].techs;
+    const isKnown = (i: number) => overlay.revealAll || explored[i] === 1;
+    const isVisible = (i: number) => overlay.revealAll || vis[i] === 1;
+    this.pulse = overlay.pulse;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const shadow = (x: number, y: number, w: number) => {
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(x, y, w, w * 0.38, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    // ícones de recursos/maravilhas naturais, distritos, maravilhas e acampamentos
+    if (zoom >= 0.45) {
+      for (const i of tiles) {
+        const t = state.map.tiles[i];
+        if (!isKnown(i)) continue;
+        const c = tileCenter(state, i);
+        if (!place(c.x, c.y)) continue;
+        if (t.district) this.drawDistrict(t.district, { x: c.x, y: c.y - 10 });
+        if (t.builtWonder) this.drawBuiltWonder(t.builtWonder, { x: c.x, y: c.y - 12 }, zoom);
+        if (t.wonder || t.resource) this.drawTileIcons(t, { x: c.x, y: c.y - 8 }, zoom, overlay.revealAll ? undefined : techs);
+      }
+    }
+    for (const c of state.camps) {
+      if (!isKnown(c.pos)) continue;
+      const p = tileCenter(state, c.pos);
+      if (place(p.x, p.y)) this.drawCamp({ x: p.x, y: p.y - 8 });
+    }
+
+    // estandartes das cidades (as casas são 3D)
+    for (const c of state.cities) {
+      if (!isKnown(c.pos)) continue;
+      const p = tileCenter(state, c.pos);
+      if (!place(p.x, p.y)) continue;
+      this.drawCity(state, c.pos, c.name, c.population, c.owner, c.isCapital, overlay.cityInfo?.get(c.id), false);
+      const max = 200 + (c.buildings.includes('walls') ? 100 : 0);
+      if (c.hp < max) this.drawHpBar(p.x, p.y - HEX_SIZE - 10, 34, c.hp / max);
+    }
+
+    // unidades em pé (mais distantes primeiro)
+    const byTile = new Map<number, typeof state.units>();
+    const animated: typeof state.units = [];
+    for (const u of state.units) {
+      if (u.owner !== playerId && !isVisible(u.pos)) continue;
+      if (overlay.unitPositions?.has(u.id)) animated.push(u);
+      else byTile.set(u.pos, [...(byTile.get(u.pos) ?? []), u]);
+    }
+    const lift = 13;
+    const stacks = [...byTile].sort((a, b) => a[0] - b[0]);
+    for (const [pos, units] of stacks) {
+      const { x, y } = tileCenter(state, pos);
+      units.sort((a, b) => (UNITS[a.type].class === 'civilian' ? -1 : 1) - (UNITS[b.type].class === 'civilian' ? -1 : 1));
+      units.forEach((u, k) => {
+        const ux = x + (units.length > 1 ? (k === 0 ? -10 : 10) : 0);
+        if (!place(ux, y)) return;
+        shadow(ux, y + 2, 10);
+        const uy = y - lift;
+        this.drawUnit(state, u.type, u.owner, ux, uy, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+        if (u.hp < 100) this.drawHpBar(ux, uy + 16, 22, u.hp / 100);
+        if (u.owner === playerId && UNITS[u.type].combat && u.promotions.length < PROMOTION_XP.length && u.xp >= PROMOTION_XP[u.promotions.length]) {
+          ctx.fillStyle = '#ffd23f';
+          ctx.font = '700 11px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('★', ux - 11, uy - 10);
+        }
+      });
+    }
+    for (const u of animated) {
+      const p = overlay.unitPositions!.get(u.id)!;
+      if (!place(p.x, p.y)) continue;
+      shadow(p.x, p.y + 2, 10);
+      this.drawUnit(state, u.type, u.owner, p.x, p.y - lift, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+      if (u.hp < 100) this.drawHpBar(p.x, p.y - lift + 16, 22, u.hp / 100);
+    }
+    for (const g of overlay.ghosts ?? []) {
+      if (!state.players[g.owner] || !place(g.x, g.y)) continue;
+      ctx.globalAlpha = Math.max(0, g.alpha);
+      this.drawUnit(state, g.type, g.owner, g.x, g.y - lift, false, false, false);
+      ctx.globalAlpha = 1;
+    }
+    for (const b of overlay.bursts ?? []) if (place(b.x, b.y)) this.drawBurst({ ...b, y: b.y - 8 });
+    for (const pr of overlay.projectiles ?? []) {
+      if (place(pr.x, pr.y)) this.drawProjectile({ ...pr, y: pr.y - lift, tail: { x: pr.tail.x, y: pr.tail.y - lift } });
+    }
+    for (const f of overlay.floaters ?? []) if (place(f.x, f.y)) this.drawFloater({ ...f, y: f.y - lift - 8 });
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
@@ -906,11 +1083,18 @@ export class Renderer {
     owner: number,
     capital: boolean,
     info?: { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number },
+    houses = true,
   ): void {
-    const { ctx } = this;
     const { x, y } = tileCenter(state, pos);
     const civ = CIV_BY_ID[state.players[owner]?.civId];
     // casinhas
+    if (houses) this.drawHouses(x, y);
+    // estandarte com nome
+    this.drawBanner(x, y, name, pop, capital, civ, info);
+  }
+
+  private drawHouses(x: number, y: number): void {
+    const { ctx } = this;
     ctx.fillStyle = '#d9c7a3';
     ctx.strokeStyle = '#4a3a22';
     ctx.lineWidth = 1.2;
@@ -934,7 +1118,18 @@ export class Renderer {
       ctx.fill();
       ctx.fillStyle = '#d9c7a3';
     }
-    // estandarte com nome
+  }
+
+  private drawBanner(
+    x: number,
+    y: number,
+    name: string,
+    pop: number,
+    capital: boolean,
+    civ: { color: string } | undefined,
+    info?: { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number },
+  ): void {
+    const { ctx } = this;
     ctx.font = '700 11px system-ui, sans-serif';
     const label = `${capital ? '★ ' : ''}${name}`;
     const tw = ctx.measureText(label).width;
@@ -1136,6 +1331,16 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(String(turns), end.x, end.y + 0.5);
+  }
+
+  /** Ponto do mundo sob o ponto de tela (toque). */
+  pick(cam: Camera, sx: number, sy: number): { x: number; y: number } {
+    return screenToWorld(cam, this.vw, this.vh, sx, sy);
+  }
+
+  /** Unidades de mundo por pixel arrastado. */
+  panScale(cam: Camera): { x: number; y: number } {
+    return { x: 1 / cam.zoom, y: 1 / cam.zoom };
   }
 
   /** Centro de um hexágono em coordenadas de tela (para posicionar UI). */
