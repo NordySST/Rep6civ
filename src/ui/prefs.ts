@@ -6,6 +6,8 @@ export interface Prefs {
   largeText: boolean;
   /** Mapa em 3D (WebGL); sem suporte, o jogo usa o 2D. */
   view3d: boolean;
+  /** Gráficos 3D em alta qualidade (sombras, água e nuvens animadas); `undefined` = pelo aparelho. */
+  hq3d?: boolean;
   seenTips: string[];
 }
 

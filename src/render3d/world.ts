@@ -24,8 +24,8 @@ export function gridFor(field: TerrainField, minStep: number, budget: number) {
   return { nx, nz, sx: field.worldW / (nx - 1), sz: field.worldH / (nz - 1) };
 }
 
-export function buildTerrain(field: TerrainField, mat: THREE.Material): THREE.Group {
-  const { nx, nz, sx, sz } = gridFor(field, 5, 200000);
+export function buildTerrain(field: TerrainField, mat: THREE.Material, budget = 200000): THREE.Group {
+  const { nx, nz, sx, sz } = gridFor(field, 5, budget);
   const H = new Float32Array(nx * nz);
   const C = new Float32Array(nx * nz * 3);
   const out = new Float32Array(5);

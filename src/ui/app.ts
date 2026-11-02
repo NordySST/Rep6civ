@@ -236,6 +236,8 @@ export class App {
       this.dirty = true;
     }
     // pulso da unidade selecionada (~20 quadros/s para poupar bateria)
+    // água e nuvens do 3D (alta qualidade) pedem quadros extras, nunca com o mapa coberto
+    if (this.prefs.animations && this.el.modal.hidden && this.view.wantsFrame?.(now)) this.dirty = true;
     const pulsing = this.prefs.animations && this.selectedUnitId !== undefined && this.el.modal.hidden;
     if (pulsing && now - this.lastPulse > 50) {
       this.lastPulse = now;
@@ -269,17 +271,17 @@ export class App {
   };
 
   /** Liga/desliga o mapa 3D conforme a preferência (o módulo 3D só é baixado quando usado). */
-  private async applyViewPref(): Promise<void> {
+  private async applyViewPref(rebuild = false): Promise<void> {
     const want3d = this.prefs.view3d;
-    if (want3d === (this.view.kind === '3d')) return;
-    if (!want3d) {
+    if (want3d === (this.view.kind === '3d') && !(rebuild && want3d)) return;
+    if (!want3d || rebuild) {
       this.view.dispose?.();
       this.glCanvas?.remove();
       this.glCanvas = undefined;
       this.view = this.renderer;
       document.body.classList.remove('map-3d');
       this.resize();
-      return;
+      if (!want3d) return;
     }
     try {
       const mod = await import('../render3d/renderer3d');
@@ -288,7 +290,8 @@ export class App {
       const gl = h('canvas', { class: 'map-gl', 'aria-hidden': 'true' }) as HTMLCanvasElement;
       this.el.canvas.before(gl);
       this.glCanvas = gl;
-      this.view = new mod.Renderer3D(gl, this.renderer, (c) => new Renderer(c));
+      const quality = this.prefs.hq3d === undefined ? mod.defaultQuality() : this.prefs.hq3d ? 'high' : 'low';
+      this.view = new mod.Renderer3D(gl, this.renderer, (c) => new Renderer(c), quality);
       document.body.classList.add('map-3d');
       this.resize();
     } catch (e) {
@@ -2239,7 +2242,8 @@ export class App {
 
   private showSettings(): void {
     const host = this.modalHost();
-    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText' | 'view3d') =>
+    if (this.prefs.hq3d === undefined) this.prefs.hq3d = this.view.kind === '3d' ? (this.view as { quality?: string }).quality === 'high' : true;
+    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText' | 'view3d' | 'hq3d') =>
       h(
         'button',
         {
@@ -2253,6 +2257,7 @@ export class App {
             setSoundEnabled(this.prefs.sound);
             this.showSettings();
             if (key === 'view3d') void this.applyViewPref();
+            if (key === 'hq3d') void this.applyViewPref(true);
             this.view.resize();
             this.invalidate();
           },
@@ -2270,6 +2275,7 @@ export class App {
         toggle(T.prefAnimations, 'animations'),
         toggle(T.prefLargeText, 'largeText'),
         toggle(T.prefView3d, 'view3d'),
+        ...(this.prefs.view3d ? [toggle(T.prefHq3d, 'hq3d')] : []),
         h('small', { class: 'muted' }, T.view3dHint),
         h('small', { class: 'muted' }, T.keyboardHelp),
       ),

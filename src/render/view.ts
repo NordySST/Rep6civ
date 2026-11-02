@@ -19,4 +19,6 @@ export interface MapView {
   panScale(cam: Camera): { x: number; y: number };
   tileToScreen(state: GameState, cam: Camera, idx: number): { x: number; y: number };
   dispose?(): void;
+  /** Visões com animação contínua (água, nuvens) pedem quadros extras. */
+  wantsFrame?(now: number): boolean;
 }
