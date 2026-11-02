@@ -141,8 +141,14 @@ export const T = {
   weDeclared: (n: string) => `Você declarou guerra a ${n}.`,
   warBetween: (a: string, b: string) => `${a} declarou guerra a ${b}.`,
   peaceWith: (n: string) => `Paz assinada com ${n}.`,
-  agreementMsg: (item: 'openBorders' | 'friendship', n: string) =>
-    item === 'openBorders' ? `Fronteiras abertas com ${n}.` : `Declaração de amizade com ${n}.`,
+  agreementMsg: (item: 'openBorders' | 'friendship' | 'luxury' | 'researchAgreement', n: string) =>
+    item === 'openBorders'
+      ? `Fronteiras abertas com ${n}.`
+      : item === 'friendship'
+        ? `Declaração de amizade com ${n}.`
+        : item === 'luxury'
+          ? `Troca de luxos acertada com ${n}.`
+          : `Acordo de pesquisa firmado com ${n}.`,
   dealRejected: (n: string, why: string) => `${n} recusou: ${why}`,
   suzerainMsg: (cs: string, n: string | null) => (n ? `${n} é o novo suserano de ${cs}.` : `${cs} não tem mais suserano.`),
   eliminatedMsg: (n: string) => `${n} foi eliminada.`,
@@ -212,6 +218,21 @@ export const T = {
   pillage: 'Saquear',
   repair: 'Reparar',
   unlockPolicies: (cost: number) => `Liberar trocas agora (${cost} 🪙)`,
+  itemLuxury: (r: string, from: string) => `${r} de ${from} (30 turnos)`,
+  itemResearch: 'Acordo de pesquisa (100 🪙 de cada lado; +150 🔬 em 20 turnos)',
+  negotiate: 'Negociar',
+  propose: 'Propor acordo',
+  youGive: 'você cede (30 turnos)',
+  youGet: 'você recebe (30 turnos)',
+  noTradeableLux: 'Nenhum luxo disponível para troca.',
+  yourLuxuries: 'Seus luxos',
+  theirLuxuries: (n: string) => `Luxos de ${n}`,
+  goldOffer: 'Ouro oferecido',
+  researchNeedsFriend: 'Exige declaração de amizade.',
+  researchDone: (n: number) => `Acordo de pesquisa concluído: +${n} 🔬.`,
+  luxuryEnded: (r: string) => `A troca de ${r} terminou.`,
+  specialists: 'Especialistas',
+  each: 'cada',
   eraMsg: (era: string) => `Sua civilização entrou na ${era}!`,
   scoreboard: 'Placar e vitórias',
   gotIt: 'Entendi',

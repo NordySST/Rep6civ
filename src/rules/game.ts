@@ -86,6 +86,8 @@ export function newGame(opts: NewGameOptions): GameState {
     diplomacy: {},
     proposals: [],
     tradeRoutes: [],
+    luxuryDeals: [],
+    researchAgreements: [],
     religions: [],
     gpRecruited: {},
     nextId: 1,

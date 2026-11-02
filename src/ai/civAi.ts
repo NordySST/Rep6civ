@@ -416,6 +416,41 @@ function exploreTarget(state: GameState, id: number, u: Unit): number | null {
   return best;
 }
 
+export const SIEGE_RALLY_DIST = 4;
+export const SIEGE_MIN_ARMY = 3;
+
+/**
+ * Plano de cerco: alvo = cidade inimiga (de civilização/cidade-estado em guerra) mais
+ * próxima da nossa capital. Enquanto houver menos de 3 unidades a ≤ 4 do alvo, o exército
+ * se reúne (`waiting`); depois avança junto.
+ */
+export function siegePlan(state: GameState, id: number): { target: number; waiting: boolean } | null {
+  const cap = state.cities.find((c) => c.owner === id && c.isCapital) ?? state.cities.find((c) => c.owner === id);
+  if (!cap) return null;
+  const enemies = state.cities.filter((c) => !state.players[c.owner].isBarbarian && c.owner !== id && atWar(state, id, c.owner));
+  if (!enemies.length) return null;
+  const target = enemies.reduce((a, b) => (distance(state.map, cap.pos, b.pos) < distance(state.map, cap.pos, a.pos) ? b : a));
+  if (distance(state.map, cap.pos, target.pos) > 20) return null;
+  const army = state.units.filter(
+    (x) =>
+      x.owner === id &&
+      UNITS[x.type].class === 'military' &&
+      UNITS[x.type].combat !== 'recon' &&
+      UNITS[x.type].domain !== 'sea' &&
+      distance(state.map, x.pos, target.pos) <= SIEGE_RALLY_DIST,
+  ).length;
+  return { target: target.pos, waiting: army < SIEGE_MIN_ARMY };
+}
+
+/** Anda em direção ao alvo, mas para a `stopDist` hexágonos dele. */
+function moveTowardStopAt(state: GameState, id: number, u: Unit, target: number, stopDist: number, events: GameEvent[]): void {
+  const res = findPath(state, u, target, { ignoreFog: true, allowEnemyGoal: true });
+  if (!res) return;
+  const idx = res.path.findIndex((p) => distance(state.map, p, target) < stopDist);
+  const usable = idx < 0 ? res.path : res.path.slice(0, idx);
+  if (usable.length) act(state, id, { type: 'move', unitId: u.id, target: usable[usable.length - 1] }, events);
+}
+
 function runMilitary(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
   const def = UNITS[u.type];
   const home = state.cities.filter((c) => c.owner === id);
@@ -427,7 +462,21 @@ function runMilitary(state: GameState, id: number, u: Unit, events: GameEvent[])
     return;
   }
   if (tryAttackBest(state, id, u, events)) return;
-  const target = hostileTarget(state, id, u);
+  // cerco coordenado: reúne o exército perto da cidade inimiga antes de avançar
+  const soleGarrison =
+    home.some((c) => c.pos === u.pos) &&
+    state.units.filter((x) => x.owner === id && x.pos === u.pos && UNITS[x.type].class === 'military').length === 1;
+  const siege = def.combat !== 'recon' && !soleGarrison && def.domain !== 'sea' ? siegePlan(state, id) : null;
+  if (siege && siege.waiting) {
+    const d = distance(state.map, u.pos, siege.target);
+    if (d > SIEGE_RALLY_DIST) {
+      moveTowardStopAt(state, id, u, siege.target, SIEGE_RALLY_DIST, events);
+      return;
+    }
+    if (!u.fortified) act(state, id, { type: 'fortify', unitId: u.id }, events);
+    return;
+  }
+  const target = siege ? siege.target : hostileTarget(state, id, u);
   if (target !== null && def.combat !== 'recon') {
     const ranged = isRanged(u);
     if (!ranged || distance(state.map, u.pos, target) > unitRange(u)) moveToward(state, id, u, target, events, true);

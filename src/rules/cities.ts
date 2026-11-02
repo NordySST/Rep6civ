@@ -7,7 +7,7 @@ import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/types';
 import { distance, neighbors, tilesInRadius } from './hex';
 import { CIVIC_BY_ID } from '../data/civics';
-import { DISTRICT_LIST, DISTRICTS, type DistrictId } from '../data/districts';
+import { DISTRICT_LIST, DISTRICTS, SPECIALIST_BASE_SLOTS, type DistrictId } from '../data/districts';
 import { WORLD_WONDER_BY_ID, WORLD_WONDERS } from '../data/worldWonders';
 import {
   abilityCityBonus,
@@ -104,6 +104,7 @@ export function cityYields(state: GameState, city: City): Yields {
   for (const i of city.worked) addYields(y, cityTileYields(state, city, state.map.tiles[i]));
   addYields(y, buildingYields(city));
   addYields(y, citizenYields(city));
+  addYields(y, specialistYields(city));
   addYields(y, districtYields(state, city));
   addYields(y, wonderCityYields(city));
   addYields(y, abilityCityBonus(state, city));
@@ -191,9 +192,55 @@ function tileScore(y: Yields, focus: CityFocus, surplus: number): number {
  * Distribui os cidadãos: primeiro os hexágonos fixados, depois escolha gulosa
  * conforme o foco, priorizando comida enquanto o saldo for baixo. Muta `city`.
  */
+/** Vagas de especialista de um distrito na cidade. */
+export function specialistSlots(city: City, district: string): number {
+  if (!city.districts.some((d) => d.type === district)) return 0;
+  return SPECIALIST_BASE_SLOTS + city.buildings.filter((b) => BUILDINGS[b]?.district === district).length;
+}
+
+export function specialistCount(city: City): number {
+  return Object.values(city.specialists ?? {}).reduce((a, b) => a + b, 0);
+}
+
+export function specialistYields(city: City): Yields {
+  const y = emptyYields();
+  for (const [d, n] of Object.entries(city.specialists ?? {})) {
+    const def = DISTRICTS[d as DistrictId];
+    for (let k = 0; k < n; k++) addYields(y, def?.specialist);
+  }
+  return y;
+}
+
+/** Ajusta especialistas às vagas e à população (muta). */
+function clampSpecialists(city: City): void {
+  const sp = city.specialists ?? {};
+  let total = 0;
+  for (const d of Object.keys(sp)) {
+    sp[d] = Math.max(0, Math.min(sp[d], specialistSlots(city, d), city.population - total));
+    total += sp[d];
+    if (!sp[d]) delete sp[d];
+  }
+  city.specialists = sp;
+}
+
+/** Define quantos especialistas trabalham num distrito (muta). */
+export function setSpecialists(state: GameState, city: City, district: string, count: number): string | null {
+  const slots = specialistSlots(city, district);
+  if (!slots) return 'A cidade não tem este distrito.';
+  const others = specialistCount(city) - (city.specialists?.[district] ?? 0);
+  if (count < 0 || count > slots) return `Vagas: ${slots}.`;
+  if (count + others > city.population) return 'População insuficiente.';
+  city.specialists = { ...(city.specialists ?? {}), [district]: count };
+  if (!count) delete city.specialists[district];
+  assignCitizens(state, city);
+  return null;
+}
+
 export function assignCitizens(state: GameState, city: City): void {
+  clampSpecialists(city);
   const workable = new Set(workableTiles(state, city));
-  city.locked = city.locked.filter((i) => workable.has(i)).slice(0, city.population);
+  const tileWorkers = city.population - specialistCount(city);
+  city.locked = city.locked.filter((i) => workable.has(i)).slice(0, tileWorkers);
   const worked: number[] = [...city.locked];
   const base = cityCenterYields(state, city);
   addYields(base, buildingYields(city));
@@ -201,7 +248,7 @@ export function assignCitizens(state: GameState, city: City): void {
   const ty = (i: number) => cityTileYields(state, city, state.map.tiles[i]);
   for (const i of worked) food += ty(i).food;
   const free = [...workable].filter((i) => !worked.includes(i));
-  while (worked.length < city.population && free.length) {
+  while (worked.length < tileWorkers && free.length) {
     const surplus = food - city.population * FOOD_PER_POP;
     let best = 0;
     let bestScore = -Infinity;
@@ -217,6 +264,23 @@ export function assignCitizens(state: GameState, city: City): void {
     food += ty(pick).food;
   }
   city.worked = worked;
+  // sobraram cidadãos sem hexágono: viram especialistas nas vagas livres
+  let idle = tileWorkers - worked.length;
+  if (idle > 0) {
+    for (const d of city.districts) {
+      if (idle <= 0) break;
+      const cur = city.specialists?.[d.type] ?? 0;
+      const add = Math.min(idle, specialistSlots(city, d.type) - cur);
+      if (add > 0) {
+        city.specialists = { ...(city.specialists ?? {}), [d.type]: cur + add };
+        idle -= add;
+      }
+    }
+  }
+}
+
+function expectedWorked(state: GameState, city: City): number {
+  return Math.min(city.population - specialistCount(city), workableTiles(state, city).length);
 }
 
 /** Alterna um hexágono entre trabalhado/fixado e livre. Retorna mensagem de erro, se houver. */
@@ -230,7 +294,7 @@ export function toggleWorkedTile(state: GameState, city: City, idx: number): str
   if (city.population === 0) return 'Sem cidadãos disponíveis.';
   // fixa o hexágono; se exceder, libera o fixado mais antigo
   city.locked.push(idx);
-  if (city.locked.length > city.population) city.locked.shift();
+  if (city.locked.length > city.population - specialistCount(city)) city.locked.shift();
   assignCitizens(state, city);
   return null;
 }
@@ -548,7 +612,7 @@ export function purchaseTile(state: GameState, city: City, idx: number): string 
 export function processCity(state: GameState, city: City): CityEvent[] {
   const events: CityEvent[] = [];
   const player = state.players[city.owner];
-  if (city.worked.length !== Math.min(city.population, workableTiles(state, city).length)) assignCitizens(state, city);
+  if (city.worked.length !== expectedWorked(state, city)) assignCitizens(state, city);
   const y = cityYields(state, city);
 
   // comida e crescimento
@@ -639,7 +703,7 @@ export function citiesNeedingProduction(state: GameState, playerId: number): Cit
 /** Garante invariantes após carregar um save (ex.: cidadãos distribuídos). Muta. */
 export function normalizeState(state: GameState): GameState {
   for (const c of state.cities) {
-    if (c.worked.length !== Math.min(c.population, workableTiles(state, c).length)) assignCitizens(state, c);
+    if (c.worked.length !== expectedWorked(state, c)) assignCitizens(state, c);
   }
   return state;
 }

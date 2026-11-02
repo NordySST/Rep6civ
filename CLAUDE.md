@@ -309,6 +309,27 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   aparece no impacto. Evento `combat` traz `from` (hexágono do atacante).
 - `window.__rep6civ` (somente leitura: câmera e turno) para testes automatizados.
 
+### Pós-etapas — Lote B
+
+- Especialistas: cada distrito tem `1 + edifícios do distrito` vagas
+  (`specialistSlots`); o especialista não trabalha hexágono e rende `DistrictDef.specialist`
+  (ex.: Campus +2 ciência) e +1 ponto da grande personalidade do distrito. Controle manual
+  (+/− no painel, ação `setSpecialists`); cidadãos sem hexágono livre viram especialistas
+  automaticamente.
+- Troca de luxos (`DealItem` `luxury`): cede o uso de um luxo por 30 turnos
+  (`state.luxuryDeals`); quem cede deixa de contar com ele (`tradeableLuxuries` /
+  `effectiveLuxuries`). Guerra cancela.
+- Acordos de pesquisa (`researchAgreement`): exigem amizade e 100 de ouro de cada lado;
+  após 20 turnos, +150 de ciência para ambos (`state.researchAgreements`).
+- Flanqueamento/apoio: +2 de ataque corpo a corpo por unidade militar sua ao lado do alvo;
+  +2 de defesa por unidade aliada ao lado do defensor (só em combate real).
+- IA: cerco coordenado (`siegePlan`: reúne ≥ 3 unidades a ≤ 4 da cidade inimiga mais
+  próxima antes de avançar; a guarnição única fica em casa); propõe trocas de luxo e
+  acordos de pesquisa; aceita/recusa pelo valor.
+- UI: especialistas no painel da cidade; botão 📜 Negociar na Diplomacia (luxos dos dois
+  lados, ouro, acordo de pesquisa).
+- Save v9 (migração 8→9: `luxuryDeals`, `researchAgreements`; `specialists` é opcional).
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),

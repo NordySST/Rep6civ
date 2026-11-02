@@ -141,6 +141,8 @@ export const MIGRATIONS: MigrationTable = {
     players: s.players.map((p: any) => ({ lifetimeCulture: p.culture ?? 0, ...p })),
     cities: s.cities.map((c: any) => (c.isCapital && c.originalCapitalOf === undefined ? { ...c, originalCapitalOf: c.owner } : c)),
   }),
+  // v8 → v9 (lote B): troca de luxos e acordos de pesquisa; especialistas são opcionais.
+  8: (s) => ({ ...s, luxuryDeals: s.luxuryDeals ?? [], researchAgreements: s.researchAgreements ?? [] }),
 };
 
 export class SaveError extends Error {}

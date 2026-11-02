@@ -67,13 +67,26 @@ export function improvedLuxuries(state: GameState, playerId: number): string[] {
   return [...found].sort();
 }
 
+/** Luxos do jogador que ainda não foram cedidos a outro (podem ser negociados). */
+export function tradeableLuxuries(state: GameState, playerId: number): string[] {
+  const given = new Set(state.luxuryDeals.filter((d) => d.from === playerId).map((d) => d.resource));
+  return improvedLuxuries(state, playerId).filter((r) => !given.has(r));
+}
+
+/** Luxos que valem para as comodidades: próprios não cedidos + recebidos em acordos. */
+export function effectiveLuxuries(state: GameState, playerId: number): string[] {
+  const set = new Set(tradeableLuxuries(state, playerId));
+  for (const d of state.luxuryDeals) if (d.to === playerId) set.add(d.resource);
+  return [...set].sort();
+}
+
 /** Comodidades de luxo por cidade: cada tipo atende até 4 cidades (maiores primeiro). */
 export function luxuryAmenities(state: GameState, playerId: number): Map<number, number> {
   const out = new Map<number, number>();
   const cities = state.cities
     .filter((c) => c.owner === playerId)
     .sort((a, b) => b.population - a.population || a.id - b.id);
-  const lux = improvedLuxuries(state, playerId).length;
+  const lux = effectiveLuxuries(state, playerId).length;
   for (const c of cities) out.set(c.id, 0);
   for (let k = 0; k < lux; k++) {
     // distribui cada tipo para as 4 cidades com menos comodidades de luxo até agora
