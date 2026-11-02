@@ -47,6 +47,26 @@ vec3 rep6Clouds(vec2 p, vec3 bg) {
   float n = 0.55 * rep6Noise(q) + 0.3 * rep6Noise(q * 2.3 + 3.1) + 0.15 * rep6Noise(q * 5.1 - 1.7);
   return mix(bg, vec3(0.30, 0.35, 0.43), smoothstep(0.38, 0.9, n));
 }
+/** 0 no miolo do hexágono, 1 na aresta (para a grade discreta). */
+float rep6HexEdge(vec2 p) {
+  float S = uFogMap.z;
+  vec2 o = vec2(p.x - S * 0.8660254, p.y - S);
+  float q = (0.57735027 * o.x - o.y / 3.0) / S;
+  float r = (0.66666667 * o.y) / S;
+  float s = -q - r;
+  float rq = floor(q + 0.5);
+  float rr = floor(r + 0.5);
+  float rs = floor(s + 0.5);
+  float dq = abs(rq - q);
+  float dr = abs(rr - r);
+  float ds = abs(rs - s);
+  if (dq > dr && dq > ds) rq = -rr - rs;
+  else if (dr > ds) rr = -rq - rs;
+  vec2 c = vec2(S * 1.7320508 * (rq + rr * 0.5) + S * 0.8660254, S * 1.5 * rr + S);
+  vec2 d = p - c;
+  float dist = max(abs(d.x), max(abs(0.5 * d.x + 0.8660254 * d.y), abs(-0.5 * d.x + 0.8660254 * d.y)));
+  return smoothstep(0.9, 0.99, dist / (S * 0.8660254));
+}
 float fogAt(vec2 p) {
   float S = uFogMap.z;
   vec2 o = vec2(p.x - S * 0.8660254, p.y - S);
@@ -107,6 +127,21 @@ export function patchMaterial<M extends THREE.Material>(mat: M, u: SharedUniform
         `#include <common>\n${FOG_GLSL}\nvarying vec2 vFogWorld;\nuniform vec3 uFogBg;${decal ? '\nuniform sampler2D uDecal;\nuniform vec4 uDecalRect;' : ''}`,
       )
       .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        ${
+          mode === 'terrain'
+            ? `{
+                 float d1 = rep6Noise(vFogWorld * 0.11);
+                 float d2 = rep6Noise(vFogWorld * 0.43 + 7.0);
+                 float d3 = rep6Noise(vFogWorld * 1.7 - 3.0);
+                 diffuseColor.rgb *= 0.84 + 0.16 * d1 + 0.11 * d2 + 0.09 * d3;
+                 diffuseColor.rgb *= 1.0 - 0.13 * rep6HexEdge(vFogWorld);
+               }`
+            : ''
+        }`,
+      )
+      .replace(
         '#include <dithering_fragment>',
         `${
           mode === 'water'
@@ -118,6 +153,9 @@ export function patchMaterial<M extends THREE.Material>(mat: M, u: SharedUniform
             : ''
         }
         float fogF = fogAt(vFogWorld);
+        // borda irregular: as nuvens avançam um pouco sobre o conhecido (nunca o contrário)
+        vec2 rJit = (vec2(rep6Noise(vFogWorld * 0.045 + uTime * 0.02), rep6Noise(vFogWorld * 0.045 + 9.0)) - 0.5) * 26.0;
+        if (fogF >= 0.25 && fogAt(vFogWorld + rJit) < 0.25) fogF = 0.0;
         if (fogF < 0.25) {
           gl_FragColor = vec4(rep6Clouds(vFogWorld, uFogBg), 1.0);
         } else {

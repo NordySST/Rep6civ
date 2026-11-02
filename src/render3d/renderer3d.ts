@@ -110,6 +110,9 @@ export class Renderer3D implements MapView {
       this.gl.shadowMap.type = THREE.PCFShadowMap;
     }
     this.gl.setClearColor(0x0b0f14, 1);
+    // cor "de cinema": mapeamento de tons fílmico, um pouco mais claro
+    this.gl.toneMapping = THREE.ACESFilmicToneMapping;
+    this.gl.toneMappingExposure = 1.02;
     this.uniforms = createSharedUniforms();
     this.decalTex = new THREE.CanvasTexture(this.decalCanvas);
     this.decalTex.colorSpace = THREE.NoColorSpace;
@@ -132,8 +135,8 @@ export class Renderer3D implements MapView {
       city: patchMaterial(new THREE.MeshLambertMaterial({ flatShading: true }), u, 'sink', false),
     };
     // luz: céu suave + sol baixo a noroeste (sombras de relevo legíveis)
-    this.scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x4a3f2c, 1.5));
-    const sun = new THREE.DirectionalLight(0xfff1d6, 2.1);
+    this.scene.add(new THREE.HemisphereLight(0xdde8ff, 0x5b4a33, 1.45));
+    const sun = new THREE.DirectionalLight(0xffe4bd, 2.7);
     sun.position.set(-0.55, 1, -0.45);
     this.sun = sun;
     this.scene.add(sun);
@@ -162,6 +165,13 @@ export class Renderer3D implements MapView {
     this.scene.fog = new THREE.Fog(0x22303e, 4000, 9000);
     this.scene.add(this.world);
     this.scene.add(this.unitLayer);
+    // mar de nuvens além das bordas do mapa (fora do mapa a névoa é sempre "inexplorado")
+    const ocean = new THREE.PlaneGeometry(40000, 40000).rotateX(-Math.PI / 2);
+    ocean.setAttribute('color', new THREE.BufferAttribute(new Float32Array(ocean.attributes.position.count * 4).fill(1), 4));
+    const sea = new THREE.Mesh(ocean, this.mats.water);
+    sea.position.y = WATER_LEVEL - 14;
+    sea.renderOrder = 1;
+    this.scene.add(sea);
     this.selRing = new THREE.Mesh(
       new THREE.RingGeometry(13, 16.5, 36).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xffe680, transparent: true, opacity: 0.8, depthWrite: false }),

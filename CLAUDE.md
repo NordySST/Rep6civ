@@ -518,6 +518,18 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   mina, pedreira, barco de pesca, fazenda 3D só em alta qualidade, 2 das 5 formas de
   maravilha). A cor da equipe vai em malhas por dono (`meshesFromKits`, `worldTeamMat`).
 
+### Visual — Lote V3 (terreno e luz)
+
+- Terreno com detalhe por pixel no shader (`color_fragment` do material de terreno: três
+  oitavas de `rep6Noise` em coordenadas de mundo) e grade de hexágonos discreta
+  (`rep6HexEdge`).
+- Rios: leito de fundo plano (`TerrainField.sample`, profundidade total até ~4,5 da aresta) e
+  fita de água mais larga e subdividida acompanhando o leito — sem manchas soltas.
+- Névoa: as nuvens avançam com borda irregular sobre o conhecido (deslocamento por ruído;
+  nunca revelam o desconhecido). Um plano gigante abaixo do mapa usa o material da água, e
+  fora do mapa a névoa é sempre "inexplorado": o vazio virou um mar de nuvens.
+- Luz: mapeamento de tons fílmico (ACES, exposição 1,02), sol mais quente e céu azulado.
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),

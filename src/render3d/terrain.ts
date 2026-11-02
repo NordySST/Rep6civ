@@ -220,8 +220,9 @@ export class TerrainField {
       [r, g, b] = mix([r, g, b], SNOW, snow);
     }
     if (carve > 0 && land > 0.3) {
-      const c2 = carve * carve;
-      h -= 3.4 * c2;
+      // leito de fundo plano (a fita de água cobre todo o fundo, sem manchas)
+      const depth = Math.min(1, carve / 0.5);
+      h -= 3.8 * depth * depth * (3 - 2 * depth);
       r *= 1 - 0.18 * carve;
       g *= 1 - 0.1 * carve;
       b *= 1 - 0.18 * carve;
