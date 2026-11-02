@@ -50,6 +50,8 @@ export interface Overlay {
   attackTargets?: Set<number>;
   /** Alvo com ataque pendente de confirmação. */
   pendingAttack?: number;
+  /** Lente do colono: qualidade dos locais (3 ótimo, 2 bom, 1 fraco) e os melhores. */
+  settle?: { tiers: Map<number, 1 | 2 | 3>; best: number[] };
   /** Informação de cidades para os estandartes (crescimento/produção). */
   cityInfo?: Map<number, { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number }>;
 }
@@ -254,6 +256,8 @@ export class Renderer implements MapView {
       ctx.fill();
     }
 
+    // lente do colono
+    this.drawSettle(state, overlay);
     // área alcançável
     this.drawReachable(state, overlay, isKnown);
 
@@ -404,6 +408,36 @@ export class Renderer implements MapView {
     }
   }
 
+  private drawSettle(state: GameState, overlay: Overlay): void {
+    if (!overlay.settle) return;
+    const { ctx } = this;
+    const fill = ['', 'rgba(230, 90, 70, 0.16)', 'rgba(240, 200, 70, 0.22)', 'rgba(80, 220, 120, 0.30)'];
+    const edge = ['', 'rgba(230, 90, 70, 0.45)', 'rgba(240, 200, 70, 0.6)', 'rgba(80, 220, 120, 0.85)'];
+    for (const [i, tier] of overlay.settle.tiers) {
+      const { x, y } = tileCenter(state, i);
+      ctx.fillStyle = fill[tier];
+      ctx.strokeStyle = edge[tier];
+      ctx.lineWidth = 1.5;
+      hexPath(ctx, x, y, HEX_SIZE - 4);
+      ctx.fill();
+      ctx.stroke();
+    }
+    overlay.settle.best.forEach((i, k) => {
+      const { x, y } = tileCenter(state, i);
+      ctx.fillStyle = '#ffd23f';
+      ctx.strokeStyle = '#5a4300';
+      ctx.lineWidth = 1.5;
+      star(ctx, x, y - 2, 11, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#3a2a00';
+      ctx.font = '800 10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(k + 1), x, y - 1);
+    });
+  }
+
   private drawPlacement(state: GameState, overlay: Overlay): void {
     if (!overlay.placement) return;
     const { ctx } = this;
@@ -506,6 +540,7 @@ export class Renderer implements MapView {
       }
       this.drawRoads(state, idxs, isKnown);
       this.drawImprovements(state, idxs, true);
+      this.drawSettle(state, overlay);
       this.drawReachable(state, overlay, isKnown);
       this.drawPlacement(state, overlay);
       this.drawAttackTargets(state, overlay);

@@ -51,6 +51,7 @@ import {
   workableTiles,
 } from '../rules/cities';
 import { canFoundCity } from '../rules/city';
+import { rankSites, siteInfo, siteSummary, siteWarnings, type SiteRanking } from '../rules/settle';
 import {
   cultureProgress,
   dominationProgress,
@@ -79,6 +80,9 @@ import {
 import { routesOf, routeYields, tradeCapacity, tradeDestinations } from '../rules/trade';
 import { distance, hexLine, neighbors } from '../rules/hex';
 import { Fx, moveDuration } from './fx';
+
+/** Ponto para onde a câmera vai durante a reprodução das jogadas dos rivais. */
+type CamKey = { at: number; x: number; y: number };
 
 /** Posição, tipo e dono das unidades antes de uma ação (para animar o que mudou). */
 type UnitSnap = Map<number, { pos: number; type: string; owner: number }>;
@@ -165,6 +169,7 @@ export class App {
     tip: h('div', { class: 'tip', hidden: true, role: 'note' }),
     modal: h('div', { class: 'modal', hidden: true }),
     banner: h('div', { class: 'turn-banner', 'aria-hidden': 'true' }),
+    playback: h('button', { class: 'playback-hint', hidden: true }, T.playbackHint),
   };
 
   constructor(root: HTMLElement) {
@@ -176,7 +181,8 @@ export class App {
     root.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest?.('button')) play('click');
     });
-    root.append(this.el.canvas, this.el.banner, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal, this.el.tip);
+    this.el.playback.addEventListener('click', () => this.skipPlayback());
+    root.append(this.el.canvas, this.el.banner, this.el.playback, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal, this.el.tip);
     this.renderer = new Renderer(this.el.canvas);
     this.view = this.renderer;
 
@@ -190,6 +196,7 @@ export class App {
     attachInput(this.el.canvas, {
       onPan: (dx, dy) => {
         this.camTween = undefined;
+        if (this.playback) this.playback.plan = [];
         const k = this.view.panScale(this.cam);
         this.cam = this.clampCam({ ...this.cam, x: this.cam.x - dx * k.x, y: this.cam.y - dy * k.y });
         this.invalidate();
@@ -227,6 +234,7 @@ export class App {
   private loop = () => {
     const now = performance.now();
     if (this.fx.active(now)) this.dirty = true;
+    this.stepPlayback(now);
     if (this.camTween) {
       const { from, to, start, dur } = this.camTween;
       const t = Math.min(1, (now - start) / dur);
@@ -258,6 +266,7 @@ export class App {
         placement: this.placementOverlay(),
         pendingAttack: this.pendingAttack,
         cityInfo: this.cityInfo(),
+        settle: this.placement ? undefined : this.settleOverlay(),
         unitPositions: unitPositions.size ? unitPositions : undefined,
         floaters,
         projectiles,
@@ -352,7 +361,14 @@ export class App {
   private animateResult(before: UnitSnap, beforeVis: Uint8Array, viewer: number, events: ActionResult['events'], endTurn: boolean): void {
     const s = this.state!;
     // no multijogador local, quem assume a vez não deve ver o que aconteceu na vez do outro
-    if (this.prefs.animations && viewer === s.currentPlayer) this.queueEffects(before, beforeVis, events);
+    if (this.prefs.animations && viewer === s.currentPlayer) {
+      const sequential = endTurn && !!this.prefs.watchAi;
+      const { end, plan } = this.queueEffects(before, beforeVis, events, sequential);
+      if (sequential && end > performance.now() + 50) {
+        this.playback = { until: end + 250, plan };
+        this.el.playback.hidden = false;
+      }
+    }
     let sfx: Sfx | null = endTurn ? 'endTurn' : null;
     for (const ev of events) {
       if (ev.type === 'combat') {
@@ -370,17 +386,31 @@ export class App {
    * o próprio cursor de tempo (anda → ataca → avança), então movimentos e ataques da IA
    * aparecem na ordem em que aconteceram. Outros jogadores só animam onde você vê.
    */
-  private queueEffects(before: UnitSnap, beforeVis: Uint8Array, events: ActionResult['events']): void {
+  private queueEffects(before: UnitSnap, beforeVis: Uint8Array, events: ActionResult['events'], sequential = false): { end: number; plan: CamKey[] } {
     const s = this.state!;
     const now = performance.now();
     const viewer = s.currentPlayer;
+    // passo a passo: um cursor global encadeia as jogadas e a câmera vai até cada uma
+    let seq = now;
+    const plan: CamKey[] = [];
+    const vc = { x: this.cam.x, y: this.cam.y };
+    const reach = (Math.min(this.view.vw, this.view.vh) * 0.3) / this.cam.zoom;
+    const focus = (p: { x: number; y: number }, t: number): number => {
+      if (!sequential) return t;
+      const dx = this.wrapDx(p.x - vc.x);
+      if (Math.hypot(dx, p.y - vc.y) <= reach) return t;
+      plan.push({ at: t, x: p.x, y: p.y });
+      vc.x = p.x;
+      vc.y = p.y;
+      return t + 520;
+    };
     const seen = (i: number) => this.revealAll || !!this.vis[i] || !!beforeVis[i];
     const cursor = new Map<number, number>();
     const lastPos = new Map<number, number>();
     const ghosted = new Set<number>();
     const after = new Map(s.units.map((u) => [u.id, u]));
     const posOf = (id: number) => lastPos.get(id) ?? before.get(id)?.pos;
-    const at = (id: number) => cursor.get(id) ?? now;
+    const at = (id: number) => Math.max(cursor.get(id) ?? now, sequential ? seq : now);
     const chain = (route: number[]) => {
       const pts: { x: number; y: number }[] = [];
       for (const i of route) pts.push(pts.length ? nearCenter(s, i, pts[pts.length - 1]) : tileCenter(s, i));
@@ -399,9 +429,12 @@ export class App {
       }
       if (r.length < 2) return t0;
       const dur = moveDuration(r.length - 1);
-      this.fx.move(id, chain(r), t0, dur);
-      cursor.set(id, t0 + dur);
-      return t0 + dur;
+      const pts = chain(r);
+      const t1 = focus(pts[0], t0);
+      this.fx.move(id, pts, t1, dur);
+      cursor.set(id, t1 + dur);
+      if (sequential) seq = t1 + dur + 90;
+      return t1 + dur;
     };
     /** Caminho aproximado (sem evento detalhado, ex.: bárbaros); longe demais = salto. */
     const line = (a: number, b: number) => (a === b ? [a] : distance(s.map, a, b) <= 6 ? hexLine(s.map, a, b) : [a]);
@@ -433,8 +466,8 @@ export class App {
         const atkId = ev.attackerType === 'city' ? undefined : findAttacker(ev);
         if (atkId !== undefined) sync(atkId, ev.from);
         if (!seen(ev.pos) && !seen(ev.from)) continue;
-        const t0 = atkId !== undefined ? at(atkId) : now;
         const c = tileCenter(s, ev.pos);
+        const t0 = focus(c, atkId !== undefined ? at(atkId) : sequential ? seq : now);
         const from = nearCenter(s, ev.from, c);
         const ranged = ev.attackerType === 'city' || !!UNITS[ev.attackerType]?.rangedStrength;
         const heavy = ev.attackerType === 'city' || UNITS[ev.attackerType]?.combat === 'siege';
@@ -465,6 +498,7 @@ export class App {
           const b = before.get(atkId)!;
           this.fx.ghost(b.type, b.owner, from, now, impact + 120);
         }
+        if (sequential) seq = impact + 450;
         if (atkId !== undefined) {
           cursor.set(atkId, t0 + (ranged ? 300 : 340));
           // corpo a corpo que venceu avança para o hexágono
@@ -484,6 +518,46 @@ export class App {
       const p = posOf(u.id);
       if (p !== undefined && p !== u.pos) walk(u.id, line(p, u.pos));
     }
+    return { end: seq, plan };
+  }
+
+  // ------------------------------------------------------------------ jogadas dos rivais passo a passo
+
+  private playback?: { until: number; plan: CamKey[] };
+  private afterPlayback?: () => void;
+
+  private stepPlayback(now: number): void {
+    const pb = this.playback;
+    if (!pb) return;
+    while (pb.plan.length && pb.plan[0].at <= now) {
+      const k = pb.plan.shift()!;
+      this.moveCamera({ ...this.cam, x: k.x, y: k.y }, 450);
+    }
+    if (now >= pb.until) this.finishPlayback();
+  }
+
+  private finishPlayback(): void {
+    if (!this.playback) return;
+    this.playback = undefined;
+    this.el.playback.hidden = true;
+    const f = this.afterPlayback;
+    this.afterPlayback = undefined;
+    f?.();
+    this.invalidate();
+  }
+
+  /** Toque durante a reprodução: pula para o fim. */
+  private skipPlayback(): void {
+    this.fx.clear();
+    this.finishPlayback();
+  }
+
+  /** Novo jogo, carregar ou passar a vez: descarta efeitos e reprodução pendentes. */
+  private resetFx(): void {
+    this.fx.clear();
+    this.playback = undefined;
+    this.afterPlayback = undefined;
+    this.el.playback.hidden = true;
   }
 
   /** Mostra "Turno N · ano" por um instante no centro da tela. */
@@ -891,7 +965,7 @@ export class App {
     this.pendingPath = undefined;
     this.setState(s);
     this.inbox = {};
-    this.fx.clear();
+    this.resetFx();
     this.saveInbox();
     this.cam.zoom = 1.1;
     this.victoryShown = false;
@@ -962,6 +1036,7 @@ export class App {
 
   private onEndTurnButton(): void {
     if (!this.state) return;
+    if (this.playback) return this.skipPlayback();
     const needProd = citiesNeedingProduction(this.state, this.state.currentPlayer);
     if (needProd.length) {
       this.tip('production');
@@ -1009,23 +1084,32 @@ export class App {
       return;
     }
     this.selectedCityId = undefined;
-    if (!this.selectNextUnit()) this.selectUnit(undefined);
     this.showTurnBanner();
-    const me = this.state.players[this.state.currentPlayer];
-    if (me.eliminated) return this.showGameOver();
-    const w = this.state.winner;
-    if (w && !this.victoryShown) {
-      this.victoryShown = true;
-      return this.showVictory();
-    }
-    if (this.state.turn >= 8) this.tip('victory');
-    if (this.state.proposals.some((p) => p.to === me.id)) this.showProposals();
+    const finish = () => {
+      if (!this.state) return;
+      if (!this.selectNextUnit()) this.selectUnit(undefined);
+      const me = this.state.players[this.state.currentPlayer];
+      if (me.eliminated) return this.showGameOver();
+      const w = this.state.winner;
+      if (w && !this.victoryShown) {
+        this.victoryShown = true;
+        return this.showVictory();
+      }
+      if (this.state.turn >= 8) this.tip('victory');
+      if (this.state.proposals.some((p) => p.to === me.id)) this.showProposals();
+    };
+    // passo a passo: a seleção e os diálogos esperam as jogadas dos rivais terminarem
+    if (this.playback) {
+      this.selectUnit(undefined);
+      this.afterPlayback = finish;
+    } else finish();
   }
 
   // ------------------------------------------------------------------ entrada
 
   private onTap(sx: number, sy: number): void {
     if (!this.state) return;
+    if (this.playback) return this.skipPlayback();
     const w = this.view.pick(this.cam, sx, sy);
     const idx = tileAtWorld(this.state, w.x, w.y);
     if (idx < 0) return;
@@ -1194,9 +1278,51 @@ export class App {
     if (pos !== undefined) this.centerOn(pos);
   }
 
-  private foundCity(): void {
+  /** Lente do colono (memorizada por estado e posição do colono selecionado). */
+  private settleCache?: { state: GameState; pos: number; rank: SiteRanking };
+  private settleRanking(): SiteRanking | undefined {
+    const s = this.state;
     const u = this.selectedUnit();
-    if (!u) return;
+    if (!s || !u || u.owner !== s.currentPlayer || !UNITS[u.type].canFoundCity) return undefined;
+    if (this.settleCache?.state !== s || this.settleCache.pos !== u.pos) {
+      this.settleCache = { state: s, pos: u.pos, rank: rankSites(s, s.currentPlayer, u.pos, 6) };
+    }
+    return this.settleCache.rank;
+  }
+
+  private settleOverlay(): Overlay['settle'] {
+    const r = this.settleRanking();
+    return r ? { tiers: r.tiers, best: r.best } : undefined;
+  }
+
+  /** Linha "Ótimo local — 🏠 6 (rio) · …" para o painel do colono. */
+  private siteLine(label: string, idx: number): HTMLElement {
+    const s = this.state!;
+    const info = siteInfo(s, s.currentPlayer, idx);
+    if (!info.valid) return h('small', { class: 'muted' }, `${label}: ${info.reason}`);
+    const tier = this.settleRanking()?.tiers.get(idx) ?? 2;
+    return h('small', { class: 'hint' }, `${label}: ${T.siteTier(tier)} — ${siteSummary(info)}`);
+  }
+
+  private foundCity(confirmed = false): void {
+    const u = this.selectedUnit();
+    if (!u || !this.state) return;
+    const warnings = confirmed ? [] : siteWarnings(this.state, this.state.currentPlayer, u.pos);
+    if (warnings.length) {
+      const host = this.modalHost();
+      openModal(
+        host,
+        T.foundWarnTitle,
+        h(
+          'div',
+          { class: 'menu-list' },
+          ...warnings.map((w) => h('p', {}, '⚠ ' + w)),
+          h('button', { class: 'btn primary wide', onclick: () => (closeModal(host), this.foundCity(true)) }, T.foundAnyway),
+          h('button', { class: 'btn wide', onclick: () => closeModal(host) }, T.cancel),
+        ),
+      );
+      return;
+    }
     if (this.dispatch({ type: 'foundCity', unitId: u.id })) {
       this.autosave();
       this.selectedTile = u.pos;
@@ -1392,6 +1518,12 @@ export class App {
     if (def.charges && u.movesLeft > 0) {
       const b = availableImprovements(s, u);
       if (!b.length && !canBuildRoad(s, u).ok && s.map.tiles[u.pos].owner !== u.owner) info.push(h('small', { class: 'muted' }, 'Mova o construtor para o seu território.'));
+    }
+    if (def.canFoundCity && u.owner === s.currentPlayer) {
+      info.push(this.siteLine(T.siteHere, u.pos));
+      const dest = this.pendingPath?.path[this.pendingPath.path.length - 1];
+      if (dest !== undefined) info.push(this.siteLine(T.siteDest, dest));
+      else info.push(h('small', { class: 'muted' }, T.settleLensHint));
     }
     if (this.pendingPath) info.push(h('small', { class: 'hint' }, `${T.turnsTo(this.pendingPath.turns)} — ${T.confirmMove}`));
     else if (def.canFoundCity) {
@@ -2243,7 +2375,7 @@ export class App {
   private showSettings(): void {
     const host = this.modalHost();
     if (this.prefs.hq3d === undefined) this.prefs.hq3d = this.view.kind === '3d' ? (this.view as { quality?: string }).quality === 'high' : true;
-    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText' | 'view3d' | 'hq3d') =>
+    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText' | 'view3d' | 'hq3d' | 'watchAi') =>
       h(
         'button',
         {
@@ -2273,6 +2405,8 @@ export class App {
         toggle(T.prefSound, 'sound'),
         toggle(T.prefTips, 'tips'),
         toggle(T.prefAnimations, 'animations'),
+        toggle(T.prefWatchAi, 'watchAi'),
+        h('small', { class: 'muted' }, T.watchAiHint),
         toggle(T.prefLargeText, 'largeText'),
         toggle(T.prefView3d, 'view3d'),
         ...(this.prefs.view3d ? [toggle(T.prefHq3d, 'hq3d')] : []),
@@ -2311,7 +2445,7 @@ export class App {
               this.el.modal.classList.remove('handoff');
               closeModal(host);
               this.setState(s);
-              this.fx.clear();
+              this.resetFx();
               if (!this.selectNextUnit()) this.centerOnSelection();
               this.showTurnBanner();
               const w = s.winner;
@@ -2635,7 +2769,7 @@ export class App {
       this.selectedCityId = undefined;
       this.setState(normalizeState(s));
       this.loadInbox();
-      this.fx.clear();
+      this.resetFx();
       this.victoryShown = !!s.winner;
       if (!this.selectNextUnit()) this.centerOnSelection();
       this.toast(T.loaded);
