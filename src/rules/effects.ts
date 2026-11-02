@@ -125,6 +125,22 @@ export function canSlotPolicy(slot: SlotType, policyId: string): boolean {
   return !!p && (slot === 'wildcard' || slot === p.slot);
 }
 
+/** Custo em ouro para liberar trocas de governo/políticas fora do turno de cívica. */
+export function policyUnlockCost(player: Player): number {
+  return 30 + 10 * player.civics.length;
+}
+
+/** Paga ouro para poder trocar governo e políticas neste turno (muta). */
+export function unlockPolicies(player: Player): string | null {
+  if (player.policyChangeAvailable) return 'As trocas já estão liberadas neste turno.';
+  if (!player.government) return 'Você ainda não tem governo.';
+  const cost = policyUnlockCost(player);
+  if (player.gold < cost) return `Ouro insuficiente (precisa de ${cost}).`;
+  player.gold -= cost;
+  player.policyChangeAvailable = true;
+  return null;
+}
+
 /** Troca de governo (muta). Políticas que não cabem nos novos espaços são removidas. */
 export function setGovernment(player: Player, governmentId: string): string | null {
   if (!player.policyChangeAvailable) return 'Mudanças só são permitidas no turno em que uma cívica é concluída.';

@@ -1,7 +1,8 @@
 import type { ImprovementId } from '../data/improvements';
 import { UNITS } from '../data/units';
 import type { CityFocus, GameState, ProductionItem, Unit, VictoryType } from '../state/types';
-import { buildImprovement, buildRoad, removeFeature } from './builders';
+import { buildImprovement, buildRoad, pillage, PILLAGE_GOLD, removeFeature, repairImprovement } from './builders';
+import { districtCost } from './districts';
 import {
   assignCitizens,
   cannotProduce,
@@ -33,7 +34,7 @@ import {
   sendEnvoy,
   type DiplomacyEvent,
 } from './diplomacy';
-import { setGovernment, setPolicy } from './effects';
+import { setGovernment, setPolicy, unlockPolicies } from './effects';
 import { findPath, maxMoves, moveOneStep } from './movement';
 import { checkBoosts, processResearch, setResearch, type ResearchEvent, type TreeKind } from './research';
 import { revealForPlayer } from './visibility';
@@ -48,7 +49,10 @@ export type Action =
   | { type: 'skipUnit'; unitId: number }
   | { type: 'fortify'; unitId: number }
   | { type: 'cancelPath'; unitId: number }
-  | { type: 'buildImprovement'; unitId: number; improvement: ImprovementId }
+  | { type: 'buildImprovement'; unitId: number; improvement: ImprovementId; tile?: number }
+  | { type: 'pillage'; unitId: number }
+  | { type: 'repair'; unitId: number }
+  | { type: 'unlockPolicies' }
   | { type: 'buildRoad'; unitId: number }
   | { type: 'removeFeature'; unitId: number }
   | { type: 'setProduction'; cityId: number; item: ProductionItem }
@@ -186,7 +190,7 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
       const r =
         action.type === 'buildImprovement'
-          ? buildImprovement(state, u, action.improvement)
+          ? buildImprovement(state, u, action.improvement, action.tile)
           : action.type === 'buildRoad'
             ? buildRoad(state, u)
             : removeFeature(state, u);
@@ -202,6 +206,7 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       if ((action.item.kind === 'district' || action.item.kind === 'wonder') && action.item.tile === undefined) {
         return fail('Escolha o hexágono no mapa.');
       }
+      if (action.item.kind === 'district') action.item = { ...action.item, cost: districtCost(state, c.owner) };
       const why = cannotProduce(state, c, action.item);
       if (why) return fail(why);
       if (c.queue.some((q) => itemKey(q) === itemKey(action.item)) && action.item.kind === 'building') {
@@ -240,6 +245,20 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
       c.focus = action.focus;
       assignCitizens(state, c);
+      break;
+    }
+    case 'pillage':
+    case 'repair': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = action.type === 'pillage' ? pillage(state, u) : repairImprovement(state, u);
+      if (!r.ok) return fail(r.reason);
+      if (action.type === 'pillage') events.push({ type: 'info', message: `Melhoria saqueada: +${PILLAGE_GOLD} 🪙.` });
+      break;
+    }
+    case 'unlockPolicies': {
+      const why = unlockPolicies(state.players[state.currentPlayer]);
+      if (why) return fail(why);
       break;
     }
     case 'setResearch': {

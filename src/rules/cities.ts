@@ -247,7 +247,7 @@ export function itemDef(item: ProductionItem): UnitDef | BuildingDef | undefined
 
 export function itemCost(item: ProductionItem): number {
   if (item.kind === 'project') return PROJECTS[item.id]?.cost ?? 0;
-  if (item.kind === 'district') return districtCost();
+  if (item.kind === 'district') return item.cost ?? districtCost();
   if (item.kind === 'wonder') return WORLD_WONDER_BY_ID[item.id]?.cost ?? 0;
   return itemDef(item)?.cost ?? 0;
 }
@@ -353,7 +353,7 @@ export function productionOptions(state: GameState, city: City): ProductionItem[
     .map((b) => ({ kind: 'building', id: b.id }));
   const districts: ProductionItem[] = DISTRICT_LIST.filter(
     (d) => !hasDistrict(city, d.id) && !city.queue.some((q) => q.kind === 'district' && q.id === d.id),
-  ).map((d) => ({ kind: 'district', id: d.id }));
+  ).map((d) => ({ kind: 'district', id: d.id, cost: districtCost(state, city.owner) }));
   const wonders: ProductionItem[] = WORLD_WONDERS.filter((w) => !wonderOwner(state, w.id)).map((w) => ({ kind: 'wonder', id: w.id }));
   const projects: ProductionItem[] = PROJECT_LIST.map((p) => ({ kind: 'project', id: p.id }));
   return [...units, ...buildings, ...districts, ...wonders, ...projects];

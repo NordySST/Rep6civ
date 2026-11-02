@@ -2,7 +2,7 @@ import type { FeatureId } from './features';
 import type { TerrainId } from './terrains';
 import type { PartialYields } from './yields';
 
-export type ImprovementId = 'farm' | 'mine' | 'quarry' | 'pasture' | 'plantation' | 'camp';
+export type ImprovementId = 'farm' | 'mine' | 'quarry' | 'pasture' | 'plantation' | 'camp' | 'fishing-boats';
 
 export interface ImprovementDef {
   id: ImprovementId;
@@ -17,6 +17,8 @@ export interface ImprovementDef {
   features?: FeatureId[];
   /** Tecnologia necessária (etapa 3). */
   requiresTech?: string;
+  /** Construída na água (o construtor fica em terra, ao lado). */
+  water?: boolean;
 }
 
 export const IMPROVEMENTS: Record<ImprovementId, ImprovementDef> = {
@@ -62,6 +64,15 @@ export const IMPROVEMENTS: Record<ImprovementId, ImprovementDef> = {
     terrains: [],
     features: ['forest', 'jungle', 'marsh'],
     requiresTech: 'animal-husbandry',
+  },
+  'fishing-boats': {
+    id: 'fishing-boats',
+    name: 'Barcos de Pesca',
+    yields: { food: 1 },
+    icon: '⛵',
+    terrains: [],
+    requiresTech: 'sailing',
+    water: true,
   },
 };
 

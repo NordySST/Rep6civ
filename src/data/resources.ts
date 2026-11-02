@@ -35,8 +35,8 @@ export const RESOURCES: ResourceDef[] = [
   { id: 'bananas', name: 'Bananas', kind: 'bonus', yields: { food: 1 }, icon: '🍌', terrains: ['grassland', 'plains'], features: ['jungle'], weight: 4, improvement: 'plantation' },
   { id: 'stone', name: 'Pedra', kind: 'bonus', yields: { production: 1 }, icon: '🪨', terrains: ['grassland', 'plains', 'desert'], features: ['none'], weight: 4, improvement: 'quarry' },
   { id: 'copper', name: 'Cobre', kind: 'bonus', yields: { gold: 2 }, icon: '🟠', terrains: ['grassland', 'plains', 'desert', 'tundra'], features: ['none'], hills: true, weight: 3, improvement: 'mine' },
-  { id: 'fish', name: 'Peixes', kind: 'bonus', yields: { food: 1 }, icon: '🐟', terrains: ['coast', 'ocean'], weight: 6 },
-  { id: 'crabs', name: 'Caranguejos', kind: 'bonus', yields: { gold: 2 }, icon: '🦀', terrains: ['coast'], weight: 3 },
+  { id: 'fish', name: 'Peixes', kind: 'bonus', yields: { food: 1 }, icon: '🐟', terrains: ['coast', 'ocean'], weight: 6, improvement: 'fishing-boats' },
+  { id: 'crabs', name: 'Caranguejos', kind: 'bonus', yields: { gold: 2 }, icon: '🦀', terrains: ['coast'], weight: 3, improvement: 'fishing-boats' },
   // ---- Luxo ----
   { id: 'spices', name: 'Especiarias', kind: 'luxury', yields: { food: 2 }, icon: '🌶', terrains: ['grassland', 'plains'], features: ['jungle'], weight: 2, improvement: 'plantation' },
   { id: 'wine', name: 'Vinho', kind: 'luxury', yields: { food: 1, gold: 1 }, icon: '🍇', terrains: ['grassland', 'plains'], features: ['none'], weight: 2, improvement: 'plantation' },
@@ -47,7 +47,7 @@ export const RESOURCES: ResourceDef[] = [
   { id: 'gems', name: 'Gemas', kind: 'luxury', yields: { gold: 3 }, icon: '💎', terrains: ['grassland', 'plains', 'desert', 'tundra'], hills: true, weight: 2, improvement: 'mine' },
   { id: 'dyes', name: 'Corantes', kind: 'luxury', yields: { faith: 1, culture: 1 }, icon: '🎨', terrains: ['grassland', 'plains'], features: ['jungle', 'forest'], weight: 2, improvement: 'plantation' },
   { id: 'furs', name: 'Peles', kind: 'luxury', yields: { food: 1, gold: 1 }, icon: '🦊', terrains: ['tundra'], features: ['forest'], weight: 2, improvement: 'camp' },
-  { id: 'pearls', name: 'Pérolas', kind: 'luxury', yields: { faith: 1 }, icon: '🦪', terrains: ['coast'], weight: 2 },
+  { id: 'pearls', name: 'Pérolas', kind: 'luxury', yields: { faith: 1 }, icon: '🦪', terrains: ['coast'], weight: 2, improvement: 'fishing-boats' },
   { id: 'amber', name: 'Âmbar-luz', kind: 'luxury', yields: { science: 1, gold: 1 }, icon: '🟡', terrains: ['grassland', 'plains', 'tundra'], features: ['marsh', 'forest'], weight: 1, improvement: 'camp' },
   // ---- Estratégicos ----
   { id: 'horses', name: 'Cavalos', kind: 'strategic', yields: { food: 1, production: 1 }, icon: '🐎', terrains: ['grassland', 'plains'], features: ['none'], hills: false, weight: 3, revealedBy: 'animal-husbandry', improvement: 'pasture' },

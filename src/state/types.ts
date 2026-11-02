@@ -29,6 +29,8 @@ export interface Tile {
   district?: string;
   /** Maravilha mundial construída (id em data/worldWonders). */
   builtWonder?: string;
+  /** Melhoria saqueada: não rende até ser reparada. */
+  pillaged?: boolean;
 }
 
 export interface GameMap {
@@ -117,6 +119,8 @@ export interface ProductionItem {
   id: string;
   /** Hexágono escolhido (distritos e maravilhas). */
   tile?: number;
+  /** Custo fixado ao entrar na fila (distritos, que encarecem com as tecnologias). */
+  cost?: number;
 }
 
 export type CityFocus = 'balanced' | 'food' | 'production' | 'gold';

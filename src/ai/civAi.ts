@@ -4,7 +4,7 @@ import { IMPROVEMENTS, type ImprovementId } from '../data/improvements';
 import { MAP_SIZES } from '../data/mapSizes';
 import { UNITS } from '../data/units';
 import type { GameEvent } from '../rules/actions';
-import { improvementFits } from '../rules/builders';
+import { canPillage, improvementFits, waterTargets } from '../rules/builders';
 import { cannotProduce, cityYields, productionOptions, purchaseCost } from '../rules/cities';
 import { canFoundCity, MIN_CITY_DISTANCE } from '../rules/city';
 import { atWar, attackTargets, isRanged, nextRandom, previewAttack, unitRange } from '../rules/combat';
@@ -264,6 +264,7 @@ function improvementFor(state: GameState, id: number, tile: number): Improvement
   if (t.improvement || state.cities.some((c) => c.pos === tile)) return null;
   const techs = state.players[id].techs;
   for (const imp of Object.keys(IMPROVEMENTS) as ImprovementId[]) {
+    if (IMPROVEMENTS[imp].water) continue;
     const req = IMPROVEMENTS[imp].requiresTech;
     if (req && !techs.includes(req)) continue;
     if (improvementFits(t, imp, techs)) return imp;
@@ -271,10 +272,56 @@ function improvementFor(state: GameState, id: number, tile: number): Improvement
   return null;
 }
 
+/** Próximo hexágono sem estrada no caminho por terra entre a capital e outra cidade. */
+function roadTarget(state: GameState, id: number): number | null {
+  const cap = state.cities.find((c) => c.owner === id && c.isCapital);
+  if (!cap) return null;
+  for (const c of state.cities.filter((x) => x.owner === id && x.id !== cap.id)) {
+    // BFS por terra transitável do próprio território ou neutra
+    const prev = new Map<number, number>([[c.pos, -1]]);
+    const q = [c.pos];
+    while (q.length) {
+      const cur = q.shift()!;
+      if (cur === cap.pos) break;
+      for (const n of neighbors(state.map, cur)) {
+        if (n < 0 || prev.has(n)) continue;
+        const t = state.map.tiles[n];
+        if (!isPassableLand(t) || (t.owner !== undefined && t.owner !== id)) continue;
+        if (distance(state.map, n, cap.pos) > distance(state.map, c.pos, cap.pos) + 3) continue;
+        prev.set(n, cur);
+        q.push(n);
+      }
+    }
+    if (!prev.has(cap.pos)) continue;
+    for (let k = prev.get(cap.pos)!; k !== -1 && k !== c.pos; k = prev.get(k)!) {
+      const t = state.map.tiles[k];
+      if (!t.road && t.owner === id && !state.cities.some((x) => x.pos === k)) return k;
+    }
+  }
+  return null;
+}
+
 function runBuilder(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
-  const here = state.map.tiles[u.pos].owner === id ? improvementFor(state, id, u.pos) : null;
+  const tile = state.map.tiles[u.pos];
+  if (tile.owner === id && tile.pillaged) {
+    act(state, id, { type: 'repair', unitId: u.id }, events);
+    return;
+  }
+  const here = tile.owner === id ? improvementFor(state, id, u.pos) : null;
   if (here) {
     act(state, id, { type: 'buildImprovement', unitId: u.id, improvement: here }, events);
+    return;
+  }
+  // barcos de pesca a partir da margem
+  const boats = waterTargets(state, u, 'fishing-boats');
+  if (boats.length && state.players[id].techs.includes('sailing')) {
+    act(state, id, { type: 'buildImprovement', unitId: u.id, improvement: 'fishing-boats', tile: boats[0] }, events);
+    return;
+  }
+  // reparar saques no território
+  const pillaged = tilesInRadius(state.map, u.pos, 6).filter((i) => state.map.tiles[i].owner === id && state.map.tiles[i].pillaged);
+  if (pillaged.length) {
+    moveToward(state, id, u, pillaged[0], events);
     return;
   }
   let best: number | null = null;
@@ -290,8 +337,20 @@ function runBuilder(state: GameState, id: number, u: Unit, events: GameEvent[]):
       best = i;
     }
   }
-  if (best !== null) moveToward(state, id, u, best, events);
-  else act(state, id, { type: 'skipUnit', unitId: u.id }, events);
+  if (best !== null) {
+    moveToward(state, id, u, best, events);
+    return;
+  }
+  // sem melhorias a fazer: ligar cidades por estrada
+  const road = roadTarget(state, id);
+  if (road !== null) {
+    if (road === u.pos) act(state, id, { type: 'buildRoad', unitId: u.id }, events);
+    else moveToward(state, id, u, road, events);
+    const again = state.units.find((x) => x.id === u.id);
+    if (again && again.pos === road && again.movesLeft > 0) act(state, id, { type: 'buildRoad', unitId: u.id }, events);
+    return;
+  }
+  act(state, id, { type: 'skipUnit', unitId: u.id }, events);
 }
 
 /** Alvos hostis relevantes: unidades/cidades inimigas e acampamentos perto de nós. */
@@ -391,6 +450,10 @@ function runMilitary(state: GameState, id: number, u: Unit, events: GameEvent[])
       moveToward(state, id, u, c.pos, events);
       return;
     }
+  }
+  if (canPillage(state, u).ok) {
+    act(state, id, { type: 'pillage', unitId: u.id }, events);
+    return;
   }
   if (!u.fortified) act(state, id, { type: 'fortify', unitId: u.id }, events);
 }

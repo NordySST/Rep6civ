@@ -22,7 +22,7 @@ export const PROJECTS: Record<string, ProjectDef> = {
   'star-expedition': {
     id: 'star-expedition',
     name: 'Expedição Celeste',
-    cost: 500,
+    cost: 800,
     repeatable: false,
     requiresAllTechs: true,
     description: 'Exige todas as tecnologias. Concluir dá a VITÓRIA CIENTÍFICA.',

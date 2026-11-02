@@ -14,6 +14,7 @@ npm run typecheck  # tsc --noEmit
 npm run build      # typecheck + build de produção em dist/
 npm run preview    # serve dist/ (necessário para testar o service worker)
 node scripts/make-icons.mjs   # regenera os PNGs do PWA a partir de public/icons/icon.svg
+npm run e2e:gestures   # com `npm run preview -- --port 4175` rodando: testa pinça/arrasto com toques reais (CDP)
 ```
 
 Deploy: `.github/workflows/deploy.yml` roda testes + build e publica `dist/` no GitHub Pages
@@ -289,6 +290,24 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   animações — respeita `prefers-reduced-motion` —, texto maior), foco automático e Esc nos
   diálogos, limite de turnos no Novo jogo. Avisos de outras civilizações só aparecem para
   quem você conhece (sem vazar informação).
+
+### Pós-etapas — Lote A
+
+- Barcos de Pesca (Navegação à Vela): melhoria aquática sobre Peixes/Caranguejos/Pérolas,
+  construída por um construtor em terra adjacente (`waterTargets`); +1 comida.
+- Saque: unidade militar em território de quem está em guerra com ela saqueia a melhoria
+  (`tile.pillaged`, sem rendimento nem luxo; +15 ouro; encerra o movimento). Bárbaros
+  saqueiam quando não têm alvo ao alcance; IA em guerra também. Construtor repara sem
+  gastar carga.
+- Custo de distrito: `60 + 4 × tecnologias do dono`, fixado no item ao entrar na fila
+  (`ProductionItem.cost`).
+- Trocar governo/políticas fora do turno de cívica: `unlockPolicies` custa
+  `30 + 10 × cívicas` de ouro.
+- IA: constrói estradas ligando as cidades à capital, repara saques e faz barcos de pesca.
+- Expedição Celeste custa 800 (paliativo até as eras novas do Lote C).
+- Animações: ataque corpo a corpo "avança e volta", à distância dispara um projétil; o dano
+  aparece no impacto. Evento `combat` traz `from` (hexágono do atacante).
+- `window.__rep6civ` (somente leitura: câmera e turno) para testes automatizados.
 
 ## Plano das 8 etapas
 

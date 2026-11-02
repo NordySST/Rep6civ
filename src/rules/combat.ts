@@ -257,6 +257,8 @@ export function previewAttack(state: GameState, u: Unit, pos: number): CombatPre
 export type CombatEvent =
   | {
       type: 'combat';
+      /** Hexágono do atacante no início do ataque (animação). */
+      from: number;
       attackerOwner: number;
       attackerType: string;
       defenderOwner: number;
@@ -308,6 +310,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
   const events: CombatEvent[] = [];
   const target = targetAt(state, u, pos)!;
   const ranged = isRanged(u);
+  const from = u.pos;
   u.movesLeft = 0;
   u.acted = true;
   u.fortified = false;
@@ -361,6 +364,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
     const attackerKilled = u.hp <= 0;
     events.push({
       type: 'combat',
+      from,
       attackerOwner: u.owner,
       attackerType: u.type,
       defenderOwner: t.owner,
@@ -402,6 +406,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
   const attackerKilled = u.hp <= 0;
   events.push({
     type: 'combat',
+    from,
     attackerOwner: u.owner,
     attackerType: u.type,
     defenderOwner: city.owner,
@@ -447,6 +452,7 @@ export function cityAttack(state: GameState, city: City, pos: number): string | 
   return [
     {
       type: 'combat',
+      from: city.pos,
       attackerOwner: city.owner,
       attackerType: 'city',
       defenderOwner: enemy.owner,

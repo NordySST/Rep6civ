@@ -61,7 +61,7 @@ export function improvedLuxuries(state: GameState, playerId: number): string[] {
       const r = RESOURCE_BY_ID[t.resource];
       if (r?.kind !== 'luxury') continue;
       if (r.revealedBy && !techs.includes(r.revealedBy)) continue;
-      if (r.improvement && t.improvement === r.improvement) found.add(r.id);
+      if (r.improvement && t.improvement === r.improvement && !t.pillaged) found.add(r.id);
     }
   }
   return [...found].sort();

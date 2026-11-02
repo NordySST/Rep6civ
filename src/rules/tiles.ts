@@ -67,7 +67,7 @@ export function tileYields(t: Tile, techs?: readonly string[]): Yields {
   const res = visibleResource(t, techs);
   if (res) addYields(y, RESOURCE_BY_ID[res]?.yields);
   if (t.wonder) addYields(y, WONDER_BY_ID[t.wonder]?.yields);
-  if (t.improvement) addYields(y, IMPROVEMENTS[t.improvement as ImprovementId]?.yields);
+  if (t.improvement && !t.pillaged) addYields(y, IMPROVEMENTS[t.improvement as ImprovementId]?.yields);
   return y;
 }
 
@@ -86,7 +86,7 @@ export function describeTile(t: Tile): string {
   if (t.hills) parts.push(HILLS.name);
   if (t.feature) parts.push(FEATURES[t.feature].name);
   if (t.rivers) parts.push(RIVER.name);
-  if (t.improvement) parts.push(IMPROVEMENTS[t.improvement as ImprovementId]?.name ?? t.improvement);
+  if (t.improvement) parts.push((IMPROVEMENTS[t.improvement as ImprovementId]?.name ?? t.improvement) + (t.pillaged ? ' (saqueada)' : ''));
   if (t.road) parts.push('Estrada');
   return parts.join(' · ');
 }
