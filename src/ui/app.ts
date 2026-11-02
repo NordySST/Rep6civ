@@ -36,6 +36,7 @@ import {
   foodSurplus,
   growthThreshold,
   itemCost,
+  specialistSlots,
   itemKey,
   itemDescription,
   itemName,
@@ -61,7 +62,7 @@ import {
 import { loadPrefs, savePrefs, applyPrefs, type Prefs } from './prefs';
 import { play, setSoundEnabled, unlockAudio, type Sfx } from './audio';
 import { TIPS } from './tutorial';
-import { cityAmenities, improvedLuxuries, maintenanceOf } from '../rules/economy';
+import { cityAmenities, effectiveLuxuries, maintenanceOf, tradeableLuxuries } from '../rules/economy';
 import { gpCost, gpPerTurn } from '../rules/greatPeople';
 import {
   availableFollowerBeliefs,
@@ -434,6 +435,10 @@ export class App {
         const def = GREAT_PERSON_TYPES[ev.gpType];
         return ev.player === s.currentPlayer ? T.gpRecruited(ev.name, def.name) : hasMet(s, s.currentPlayer, ev.player) ? T.gpOther(playerName(s, ev.player), ev.name) : null;
       }
+      case 'researchAgreementDone':
+        return ev.a === s.currentPlayer || ev.b === s.currentPlayer ? T.researchDone(ev.science) : null;
+      case 'luxuryDealEnded':
+        return ev.from === s.currentPlayer || ev.to === s.currentPlayer ? T.luxuryEnded(RESOURCE_BY_ID[ev.resource]?.name ?? ev.resource) : null;
       case 'eraChanged':
         return ev.player === s.currentPlayer ? T.eraMsg(ev.era) : null;
       case 'victory':
@@ -1169,6 +1174,25 @@ export class App {
       ),
       ...this.attackPreviewLines(),
     ];
+    // especialistas: cidadãos trabalhando nos distritos
+    const specRows = c.districts
+      .filter((d) => specialistSlots(c, d.type) > 0)
+      .map((d) => {
+        const def = DISTRICTS[d.type as DistrictId];
+        const n = c.specialists?.[d.type] ?? 0;
+        const slots = specialistSlots(c, d.type);
+        const yieldsTxt = (Object.entries(def.specialist) as [keyof typeof YIELD_LABELS, number][])
+          .map(([k, v]) => `+${v}${YIELD_LABELS[k].icon}`)
+          .join(' ');
+        return h(
+          'div',
+          { class: 'spec-row' },
+          h('span', {}, `${def.icon} ${def.name}: ${n}/${slots} (${yieldsTxt} ${T.each})`),
+          h('button', { class: 'btn icon', 'aria-label': `${def.name} −`, disabled: n <= 0, onclick: () => this.dispatch({ type: 'setSpecialists', cityId: c.id, district: d.type, count: n - 1 }) && this.renderHud() }, '−'),
+          h('button', { class: 'btn icon', 'aria-label': `${def.name} +`, disabled: n >= slots, onclick: () => this.dispatch({ type: 'setSpecialists', cityId: c.id, district: d.type, count: n + 1 }) && this.renderHud() }, '+'),
+        );
+      });
+    if (specRows.length) lines.push(h('small', { class: 'field-label' }, T.specialists), ...specRows);
     if (c.districts.length || c.wonders.length) {
       const ds = c.districts.map((d) => `${DISTRICTS[d.type as DistrictId]?.icon ?? ''} ${DISTRICTS[d.type as DistrictId]?.name ?? d.type}`);
       const ws = c.wonders.map((w) => `★ ${WORLD_WONDER_BY_ID[w]?.name ?? w}`);
@@ -1388,6 +1412,7 @@ export class App {
             buttons.push(h('button', { class: 'btn', onclick: () => this.proposal(pid, [{ type: 'openBorders' }]) }, '🚪 ' + T.proposeOpenBorders));
           if (!areFriends(s, me, pid))
             buttons.push(h('button', { class: 'btn', onclick: () => this.proposal(pid, [{ type: 'friendship' }]) }, '🤝 ' + T.proposeFriendship));
+          buttons.push(h('button', { class: 'btn primary', onclick: () => this.showNegotiation(pid) }, '📜 ' + T.negotiate));
           buttons.push(
             h(
               'button',
@@ -1477,6 +1502,97 @@ export class App {
     openModal(host, T.diplomacy, body);
   }
 
+  /** Negociação com uma civilização: luxos, ouro e acordo de pesquisa. */
+  private showNegotiation(pid: number): void {
+    const s = this.state!;
+    const me = s.currentPlayer;
+    const host = this.modalHost();
+    const give = new Set<string>();
+    const ask = new Set<string>();
+    let goldGive = 0;
+    let research = false;
+    const myLux = tradeableLuxuries(s, me);
+    const theirLux = tradeableLuxuries(s, pid);
+    const render = () => {
+      const lux = (list: string[], set: Set<string>, mine: boolean) =>
+        list.length
+          ? h(
+              'div',
+              { class: 'tree-grid' },
+              ...list.map((r) =>
+                h(
+                  'button',
+                  {
+                    class: `tree-card available${set.has(r) ? ' current' : ''}`,
+                    'aria-pressed': String(set.has(r)),
+                    onclick: () => {
+                      if (set.has(r)) set.delete(r);
+                      else set.add(r);
+                      render();
+                    },
+                  },
+                  h('strong', {}, `${RESOURCE_BY_ID[r]?.icon} ${RESOURCE_BY_ID[r]?.name}`),
+                  h('small', {}, mine ? T.youGive : T.youGet),
+                ),
+              ),
+            )
+          : h('small', { class: 'muted' }, T.noTradeableLux);
+      const items: DealItem[] = [
+        ...[...give].map((r) => ({ type: 'luxury' as const, from: me, resource: r })),
+        ...[...ask].map((r) => ({ type: 'luxury' as const, from: pid, resource: r })),
+        ...(goldGive ? [{ type: 'gold' as const, from: me, amount: goldGive }] : []),
+        ...(research ? [{ type: 'researchAgreement' as const }] : []),
+      ];
+      const body = h(
+        'div',
+        { class: 'form' },
+        h('label', { class: 'field-label' }, T.yourLuxuries),
+        lux(myLux, give, true),
+        h('label', { class: 'field-label' }, T.theirLuxuries(playerName(s, pid))),
+        lux(theirLux, ask, false),
+        h('label', { class: 'field-label' }, T.goldOffer),
+        h(
+          'div',
+          { class: 'seg' },
+          ...[0, 50, 100].map((g) =>
+            h(
+              'button',
+              { class: `btn seg-btn${goldGive === g ? ' active' : ''}`, disabled: s.players[me].gold < g, onclick: () => ((goldGive = g), render()) },
+              `${g} 🪙`,
+            ),
+          ),
+        ),
+        h(
+          'button',
+          {
+            class: `btn wide toggle${research ? ' on' : ''}`,
+            'aria-pressed': String(research),
+            disabled: !areFriends(s, me, pid),
+            title: areFriends(s, me, pid) ? '' : T.researchNeedsFriend,
+            onclick: () => ((research = !research), render()),
+          },
+          `${research ? '✔' : '✕'} ${T.itemResearch}`,
+        ),
+        h(
+          'button',
+          {
+            class: 'btn primary wide',
+            disabled: !items.length,
+            onclick: () => {
+              if (this.applyResult(proposeDeal(s, pid, items))) {
+                closeModal(host);
+                this.renderHud();
+              }
+            },
+          },
+          '📜 ' + T.propose,
+        ),
+      );
+      openModal(host, `${T.negotiate} — ${playerName(s, pid)}`, body);
+    };
+    render();
+  }
+
   private showProposals(): void {
     const s = this.state;
     if (!s) return;
@@ -1491,7 +1607,11 @@ export class App {
           ? T.itemOpenBorders
           : it.type === 'friendship'
             ? T.itemFriendship
-            : T.itemGold(it.amount, playerName(s, it.from));
+            : it.type === 'luxury'
+              ? T.itemLuxury(RESOURCE_BY_ID[it.resource]?.name ?? it.resource, playerName(s, it.from))
+              : it.type === 'researchAgreement'
+                ? T.itemResearch
+                : T.itemGold(it.amount, playerName(s, it.from));
     const body = h(
       'div',
       { class: 'form' },
@@ -1692,7 +1812,7 @@ export class App {
     const me = s.currentPlayer;
     const inc = playerIncome(s, me);
     const m = maintenanceOf(s, me);
-    const lux = improvedLuxuries(s, me);
+    const lux = effectiveLuxuries(s, me);
     const routes = routesOf(s, me);
     const cityName = (id: number) => s.cities.find((c) => c.id === id)?.name ?? '?';
     const body = h(

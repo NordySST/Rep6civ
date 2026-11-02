@@ -21,6 +21,7 @@ import {
   sendEnvoy,
   suzerainOf,
 } from '../rules/diplomacy';
+import { effectiveLuxuries, tradeableLuxuries } from '../rules/economy';
 import { distance } from '../rules/hex';
 import type { DealItem, GameState } from '../state/types';
 import { unitStrength } from './common';
@@ -72,6 +73,14 @@ export function evaluateDeal(state: GameState, ai: number, from: number, items: 
         break;
       case 'gold':
         value += it.from === from ? it.amount / 2 : -it.amount;
+        break;
+      case 'luxury': {
+        if (it.from === from) value += effectiveLuxuries(state, ai).includes(it.resource) ? 5 : 25;
+        else value -= op >= 20 ? 10 : 20;
+        break;
+      }
+      case 'researchAgreement':
+        value += 30;
         break;
     }
   }
@@ -147,6 +156,25 @@ export function runDiplomacy(state: GameState, ai: number, events: GameEvent[]):
     } else if (op >= 5 && !hasOpenBorders(state, ai, o.id) && state.turn % 10 === (ai + 5) % 10) {
       if (o.isHuman) propose(state, ai, o.id, [{ type: 'openBorders' }], events);
       else if (opinionOf(state, o.id, ai) >= 0) events.push(...applyDeal(state, ai, o.id, [{ type: 'openBorders' }]));
+    } else if (op >= 0 && state.turn % 12 === ai % 12) {
+      // troca de luxos: cada um cede um que o outro não tem
+      const mine = tradeableLuxuries(state, ai).filter((r) => !effectiveLuxuries(state, o.id).includes(r));
+      const theirs = tradeableLuxuries(state, o.id).filter((r) => !effectiveLuxuries(state, ai).includes(r));
+      if (mine.length && theirs.length) {
+        const items: DealItem[] = [
+          { type: 'luxury', from: ai, resource: mine[0] },
+          { type: 'luxury', from: o.id, resource: theirs[0] },
+        ];
+        if (o.isHuman) propose(state, ai, o.id, items, events);
+        else if (!cannotApplyDeal(state, ai, o.id, items)) events.push(...applyDeal(state, ai, o.id, items));
+      }
+    } else if (
+      areFriends(state, ai, o.id) &&
+      state.turn % 15 === ai % 15 &&
+      !cannotApplyDeal(state, ai, o.id, [{ type: 'researchAgreement' }])
+    ) {
+      if (o.isHuman) propose(state, ai, o.id, [{ type: 'researchAgreement' }], events);
+      else events.push(...applyDeal(state, ai, o.id, [{ type: 'researchAgreement' }]));
     }
   }
 

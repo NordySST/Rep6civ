@@ -2,6 +2,7 @@ import { CITY_STATE_BY_ID, CITY_STATE_TYPES, ENVOY_TIERS, SUZERAIN_MIN } from '.
 import { CIV_BY_ID } from '../data/civs';
 import type { DealItem, GameState, Player, Relation } from '../state/types';
 import { applyEffect, type Modifiers } from './effects';
+import { tradeableLuxuries } from './economy';
 import { distance, neighbors } from './hex';
 import { computeVisibility } from './visibility';
 
@@ -15,6 +16,9 @@ export const AGREEMENT_TURNS = 30;
 export const MIN_WAR_TURNS_FOR_PEACE = 10;
 export const PEACE_BEFORE_WAR_TURNS = 5;
 export const ENVOY_EVERY_TURNS = 15;
+export const RESEARCH_AGREEMENT_COST = 100;
+export const RESEARCH_AGREEMENT_TURNS = 20;
+export const RESEARCH_AGREEMENT_SCIENCE = 150;
 
 export function relKey(a: number, b: number): string {
   return a < b ? `${a}-${b}` : `${b}-${a}`;
@@ -72,12 +76,14 @@ export type DiplomacyEvent =
   | { type: 'firstContact'; a: number; b: number }
   | { type: 'warDeclared'; by: number; on: number }
   | { type: 'peaceMade'; a: number; b: number }
-  | { type: 'agreement'; a: number; b: number; item: 'openBorders' | 'friendship' }
+  | { type: 'agreement'; a: number; b: number; item: 'openBorders' | 'friendship' | 'luxury' | 'researchAgreement' }
   | { type: 'dealRejected'; by: number; reason: string }
   | { type: 'proposalReceived'; from: number; id: number }
   | { type: 'suzerainChanged'; cityState: number; suzerain: number | null }
   | { type: 'eliminated'; player: number }
-  | { type: 'envoyGained'; player: number };
+  | { type: 'envoyGained'; player: number }
+  | { type: 'researchAgreementDone'; a: number; b: number; science: number }
+  | { type: 'luxuryDealEnded'; from: number; to: number; resource: string };
 
 /** Marca contato entre jogadores que se veem (unidades, cidades ou território). Muta. */
 export function checkContacts(state: GameState): DiplomacyEvent[] {
@@ -292,8 +298,19 @@ export function cannotApplyDeal(state: GameState, a: number, b: number, items: D
       if (state.turn - r.since < MIN_WAR_TURNS_FOR_PEACE) return `A guerra começou há pouco (mínimo ${MIN_WAR_TURNS_FOR_PEACE} turnos).`;
     } else if (r.war) return 'Primeiro é preciso fazer a paz.';
     if (it.type === 'gold' && state.players[it.from].gold < it.amount) return 'Ouro insuficiente.';
-    if ((it.type === 'openBorders' || it.type === 'friendship') && (state.players[a].isCityState || state.players[b].isCityState)) {
+    if (
+      (it.type === 'openBorders' || it.type === 'friendship' || it.type === 'luxury' || it.type === 'researchAgreement') &&
+      (state.players[a].isCityState || state.players[b].isCityState)
+    ) {
       return 'Cidades-estado não firmam esse acordo.';
+    }
+    if (it.type === 'luxury' && !tradeableLuxuries(state, it.from).includes(it.resource)) return 'Esse luxo não está disponível para troca.';
+    if (it.type === 'researchAgreement') {
+      if (!areFriends(state, a, b)) return 'Acordos de pesquisa exigem declaração de amizade.';
+      if (state.players[a].gold < RESEARCH_AGREEMENT_COST || state.players[b].gold < RESEARCH_AGREEMENT_COST) {
+        return `Cada lado precisa de ${RESEARCH_AGREEMENT_COST} de ouro.`;
+      }
+      if (state.researchAgreements.some((r) => (r.a === a && r.b === b) || (r.a === b && r.b === a))) return 'Já existe um acordo de pesquisa.';
     }
   }
   return null;
@@ -311,6 +328,15 @@ export function applyDeal(state: GameState, a: number, b: number, items: DealIte
     } else if (it.type === 'friendship') {
       r.friendshipUntil = state.turn + AGREEMENT_TURNS;
       events.push({ type: 'agreement', a, b, item: 'friendship' });
+    } else if (it.type === 'luxury') {
+      const to = it.from === a ? b : a;
+      state.luxuryDeals.push({ from: it.from, to, resource: it.resource, until: state.turn + AGREEMENT_TURNS });
+      if (!events.some((e) => e.type === 'agreement' && e.item === 'luxury')) events.push({ type: 'agreement', a, b, item: 'luxury' });
+    } else if (it.type === 'researchAgreement') {
+      state.players[a].gold -= RESEARCH_AGREEMENT_COST;
+      state.players[b].gold -= RESEARCH_AGREEMENT_COST;
+      state.researchAgreements.push({ a, b, until: state.turn + RESEARCH_AGREEMENT_TURNS });
+      events.push({ type: 'agreement', a, b, item: 'researchAgreement' });
     } else if (it.type === 'gold') {
       const to = it.from === a ? b : a;
       state.players[it.from].gold -= it.amount;
@@ -387,6 +413,24 @@ export function applyCityStateBonuses(state: GameState, playerId: number, m: Mod
       else applyEffect(m, { type: 'cityYields', yields: { [key]: def.type === 'trade' ? 3 : 2 } });
     }
   }
+}
+
+/** Expira trocas de luxo e conclui acordos de pesquisa (muta). Guerra cancela ambos. */
+export function processAgreements(state: GameState): DiplomacyEvent[] {
+  const ev: DiplomacyEvent[] = [];
+  state.luxuryDeals = state.luxuryDeals.filter((d) => {
+    const keep = d.until > state.turn && !isAtWar(state, d.from, d.to);
+    if (!keep) ev.push({ type: 'luxuryDealEnded', from: d.from, to: d.to, resource: d.resource });
+    return keep;
+  });
+  state.researchAgreements = state.researchAgreements.filter((r) => {
+    if (isAtWar(state, r.a, r.b)) return false;
+    if (r.until > state.turn) return true;
+    for (const id of [r.a, r.b]) if (state.players[id] && !state.players[id].eliminated) state.players[id].science += RESEARCH_AGREEMENT_SCIENCE;
+    ev.push({ type: 'researchAgreementDone', a: r.a, b: r.b, science: RESEARCH_AGREEMENT_SCIENCE });
+    return false;
+  });
+  return ev;
 }
 
 /** Emissários periódicos (+1 a cada 15 turnos) para civilizações. Muta. */

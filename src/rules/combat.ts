@@ -29,6 +29,14 @@ export const XP_RANGED_ATTACK = 3;
 export const XP_DEFEND = 3;
 export const CAMP_GOLD = 25;
 export const EMBARKED_STRENGTH = 10;
+export const FLANK_BONUS = 2;
+export const SUPPORT_BONUS = 2;
+
+/** Unidades militares de `owner` adjacentes a `pos` (exceto `exclude`). */
+export function adjacentMilitary(state: GameState, pos: number, owner: number, exclude?: number): number {
+  const ns = new Set(neighbors(state.map, pos));
+  return state.units.filter((x) => x.owner === owner && x.id !== exclude && ns.has(x.pos) && UNITS[x.type].class === 'military').length;
+}
 
 // ------------------------------------------------------------------ guerra
 
@@ -140,6 +148,8 @@ export function attackStrength(state: GameState, u: Unit, target: Target, ranged
     const tpos = target.kind === 'unit' ? target.unit.pos : target.city.pos;
     const dir = directionTo(state.map, u.pos, tpos);
     if (dir >= 0 && riverOnEdge(state.map.tiles[u.pos], dir)) s -= RIVER_ATTACK_PENALTY;
+    // flanqueamento: outras unidades militares suas ao lado do alvo
+    if (target.kind === 'unit') s += FLANK_BONUS * adjacentMilitary(state, tpos, u.owner, u.id);
   }
   s -= woundPenalty(u.hp, UNIT_MAX_HP);
   return Math.max(1, s);
@@ -157,6 +167,8 @@ export function defenseStrength(state: GameState, u: Unit, attacker?: Unit): num
   }
   s += terrainDefense(state, u.pos);
   if (u.fortified) s += FORTIFY_BONUS;
+  // apoio: unidades militares aliadas ao lado do defensor (só em combate real)
+  if (attacker) s += SUPPORT_BONUS * adjacentMilitary(state, u.pos, u.owner, u.id);
   s -= woundPenalty(u.hp, UNIT_MAX_HP);
   return Math.max(1, s);
 }

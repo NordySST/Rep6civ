@@ -24,7 +24,7 @@ export function gpPerTurn(state: GameState, playerId: number): Record<GreatPerso
     if (c.owner !== playerId) continue;
     for (const def of Object.values(GREAT_PERSON_TYPES)) {
       if (!c.districts.some((d) => d.type === def.district)) continue;
-      out[def.id] += 1 + c.buildings.filter((b) => BUILDINGS[b]?.district === def.district).length;
+      out[def.id] += 1 + c.buildings.filter((b) => BUILDINGS[b]?.district === def.district).length + (c.specialists?.[def.district] ?? 0);
     }
   }
   return out;

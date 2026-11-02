@@ -1,4 +1,4 @@
-import type { Yields } from './yields';
+import type { PartialYields, Yields } from './yields';
 
 /**
  * Distritos especializados. Cada um ocupa um hexágono do território da cidade
@@ -33,6 +33,8 @@ export interface DistrictDef {
   /** Rendimento que recebe a adjacência. */
   yieldKey?: keyof Yields;
   adjacency: AdjacencyRule[];
+  /** Rendimento de cada especialista (cidadão trabalhando no distrito). */
+  specialist: PartialYields;
   /** Posicionamento em água costeira (porto). */
   onWater?: boolean;
   requiresTech?: string;
@@ -43,6 +45,7 @@ export interface DistrictDef {
 export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   campus: {
     id: 'campus',
+    specialist: { science: 2 },
     name: 'Campus',
     icon: '🔬',
     color: '#3498db',
@@ -58,6 +61,7 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   },
   'holy-site': {
     id: 'holy-site',
+    specialist: { faith: 2 },
     name: 'Lugar Sagrado',
     icon: '✨',
     color: '#ecf0f1',
@@ -73,6 +77,7 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   },
   theater: {
     id: 'theater',
+    specialist: { culture: 2 },
     name: 'Praça Teatral',
     icon: '🎭',
     color: '#9b59b6',
@@ -86,6 +91,7 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   },
   commercial: {
     id: 'commercial',
+    specialist: { gold: 3 },
     name: 'Centro Comercial',
     icon: '🪙',
     color: '#f1c40f',
@@ -99,6 +105,7 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   },
   industrial: {
     id: 'industrial',
+    specialist: { production: 2 },
     name: 'Zona Industrial',
     icon: '⚙',
     color: '#e67e22',
@@ -113,6 +120,7 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   },
   encampment: {
     id: 'encampment',
+    specialist: { production: 1, gold: 1 },
     name: 'Acampamento Militar',
     icon: '⛨',
     color: '#c0392b',
@@ -122,6 +130,7 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
   },
   harbor: {
     id: 'harbor',
+    specialist: { food: 1, gold: 2 },
     name: 'Porto',
     icon: '⚓',
     color: '#1abc9c',
@@ -138,6 +147,9 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
 };
 
 export const DISTRICT_LIST = Object.values(DISTRICTS);
+
+/** Vagas de especialista: 1 + 1 por edifício do distrito. */
+export const SPECIALIST_BASE_SLOTS = 1;
 
 /** Custo base de um distrito (cresce com o nº de tecnologias do dono). */
 export const DISTRICT_BASE_COST = 60;

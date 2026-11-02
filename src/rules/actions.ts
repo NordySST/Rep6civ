@@ -10,6 +10,7 @@ import {
   processCity,
   purchaseItem,
   purchaseTile,
+  setSpecialists,
   toggleWorkedTile,
   type CityEvent,
 } from './cities';
@@ -31,6 +32,7 @@ import {
   declareWar,
   decayGrievances,
   grantPeriodicEnvoys,
+  processAgreements,
   sendEnvoy,
   type DiplomacyEvent,
 } from './diplomacy';
@@ -53,6 +55,7 @@ export type Action =
   | { type: 'pillage'; unitId: number }
   | { type: 'repair'; unitId: number }
   | { type: 'unlockPolicies' }
+  | { type: 'setSpecialists'; cityId: number; district: string; count: number }
   | { type: 'buildRoad'; unitId: number }
   | { type: 'removeFeature'; unitId: number }
   | { type: 'setProduction'; cityId: number; item: ProductionItem }
@@ -256,6 +259,13 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       if (action.type === 'pillage') events.push({ type: 'info', message: `Melhoria saqueada: +${PILLAGE_GOLD} 🪙.` });
       break;
     }
+    case 'setSpecialists': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      const why = setSpecialists(state, c, action.district, action.count);
+      if (why) return fail(why);
+      break;
+    }
     case 'unlockPolicies': {
       const why = unlockPolicies(state.players[state.currentPlayer]);
       if (why) return fail(why);
@@ -449,6 +459,7 @@ export function endTurn(state: GameState): GameEvent[] {
     events.push(...checkBoosts(state, p.id));
   }
   events.push(...grantPeriodicEnvoys(state));
+  events.push(...processAgreements(state));
   events.push(...checkContacts(state));
   events.push(...checkEliminations(state));
   for (const p of state.players) {

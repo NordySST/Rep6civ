@@ -97,7 +97,11 @@ export type DealItem =
   | { type: 'peace' }
   | { type: 'openBorders' }
   | { type: 'friendship' }
-  | { type: 'gold'; from: number; amount: number };
+  | { type: 'gold'; from: number; amount: number }
+  /** Cede o uso de um luxo por 30 turnos (quem cede deixa de contar com ele). */
+  | { type: 'luxury'; from: number; resource: string }
+  /** Acordo de pesquisa: 100 de ouro de cada lado; em 20 turnos, ciência para ambos. */
+  | { type: 'researchAgreement' };
 
 export interface Proposal {
   id: number;
@@ -157,6 +161,8 @@ export interface City {
   pressure: Record<string, number>;
   /** Se foi a capital original de um jogador (para a vitória por dominação). */
   originalCapitalOf?: number;
+  /** Especialistas por distrito (cidadãos que não trabalham hexágonos). */
+  specialists?: Record<string, number>;
 }
 
 export interface Player {
@@ -233,6 +239,8 @@ export interface GameState {
   /** Propostas de acordo pendentes (IA → humano). */
   proposals: Proposal[];
   tradeRoutes: TradeRoute[];
+  luxuryDeals: { from: number; to: number; resource: string; until: number }[];
+  researchAgreements: { a: number; b: number; until: number }[];
   religions: Religion[];
   /** Grandes personalidades já recrutadas no mundo, por tipo. */
   gpRecruited: Record<string, number>;

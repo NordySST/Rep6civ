@@ -437,3 +437,5 @@ button.turn-info { color: var(--text); font: inherit; cursor: pointer; }
   margin: 0 auto;
   z-index: 20;
 }
+.spec-row { display: flex; align-items: center; gap: 6px; }
+.spec-row span { flex: 1; min-width: 0; }
