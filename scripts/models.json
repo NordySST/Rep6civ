@@ -1,0 +1,226 @@
+{
+ "townCenter2": {
+  "file": "UltimateFantasyRTS/S_TownCenterFirstAgeLevel2.usda"
+ },
+ "townCenter3": {
+  "file": "UltimateFantasyRTS/S_TownCenterFirstAgeLevel3.usda"
+ },
+ "townCenter4": {
+  "file": "UltimateFantasyRTS/S_TownCenterSecondAgeLevel2.usda"
+ },
+ "townCenter5": {
+  "file": "UltimateFantasyRTS/S_TownCenterSecondAgeLevel3.usda"
+ },
+ "houseA": {
+  "file": "UltimateFantasyRTS/S_HousesFirstAge2Level1.usda"
+ },
+ "houseB": {
+  "file": "UltimateFantasyRTS/S_HousesFirstAge3Level1.usda"
+ },
+ "houseC": {
+  "file": "UltimateFantasyRTS/S_HousesSecondAge1Level1.usda"
+ },
+ "houseD": {
+  "file": "UltimateFantasyRTS/S_HousesSecondAge2Level2.usda"
+ },
+ "temple": {
+  "file": "UltimateFantasyRTS/S_TempleFirstAgeLevel2.usda"
+ },
+ "market": {
+  "file": "UltimateFantasyRTS/S_MarketFirstAgeLevel2.usda"
+ },
+ "barracks": {
+  "file": "UltimateFantasyRTS/S_BarracksFirstAgeLevel2.usda"
+ },
+ "port": {
+  "file": "UltimateFantasyRTS/S_PortFirstAgeLevel1.usda"
+ },
+ "watchTower": {
+  "file": "UltimateFantasyRTS/S_WatchTowerFirstAgeLevel2.usda"
+ },
+ "windmill": {
+  "file": "UltimateFantasyRTS/S_WindmillFirstAge.usda"
+ },
+ "storage": {
+  "file": "UltimateFantasyRTS/S_StorageFirstAgeLevel2.usda"
+ },
+ "mine": {
+  "file": "UltimateFantasyRTS/S_Mine.usda"
+ },
+ "farm": {
+  "file": "UltimateFantasyRTS/S_FarmFirstAgeLevel2Wheat.usda"
+ },
+ "wallTowers1": {
+  "file": "UltimateFantasyRTS/S_WallTowersFirstAge.usda"
+ },
+ "wallTowers2": {
+  "file": "UltimateFantasyRTS/S_WallTowersSecondAge.usda"
+ },
+ "wonder1": {
+  "file": "UltimateFantasyRTS/S_WonderFirstAgeLevel3.usda"
+ },
+ "wonder2": {
+  "file": "UltimateFantasyRTS/S_WonderSecondAgeLevel3.usda"
+ },
+ "pine": {
+  "file": "UltimateFantasyRTS/S_ResourcePineTree.usda"
+ },
+ "tree1": {
+  "file": "UltimateFantasyRTS/S_ResourceTree1.usda"
+ },
+ "tree2": {
+  "file": "UltimateFantasyRTS/S_ResourceTree2.usda"
+ },
+ "rock": {
+  "file": "UltimateFantasyRTS/S_ResourceRock_1.usda"
+ },
+ "vikingBoat": {
+  "file": "Ships/S_VikingBoat.usda"
+ },
+ "sailShip": {
+  "file": "Ships/S_SailShip.usda"
+ },
+ "boatSail": {
+  "file": "Ships/S_BoatWSail.usda"
+ },
+ "boat": {
+  "file": "Ships/S_Boat.usda"
+ },
+ "cart": {
+  "file": "MedievalVillage/S_Cart.usda"
+ },
+ "knight": {
+  "file": "KnightCharacter/SK_KnightCharacter.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    70,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -70,
+    0
+   ]
+  },
+  "attach": [
+   "Palm_R",
+   "Palm_L",
+   "Head"
+  ],
+  "tint": [
+   "Armor"
+  ]
+ },
+ "horse": {
+  "file": "FarmAnimal/SK_Horse.usda"
+ },
+ "tank": {
+  "file": "AnimatedTanks/SK_Tank.usda"
+ },
+ "rider": {
+  "file": "KnightCharacter/SK_KnightCharacter.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    60,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -60,
+    0
+   ],
+   "UpperLeg_L": [
+    80,
+    0,
+    0
+   ],
+   "UpperLeg_R": [
+    80,
+    0,
+    0
+   ],
+   "LowerLeg_L": [
+    -80,
+    0,
+    0
+   ],
+   "LowerLeg_R": [
+    -80,
+    0,
+    0
+   ]
+  },
+  "attach": [
+   "Palm_R",
+   "Palm_L",
+   "Head",
+   "Hips"
+  ],
+  "tint": [
+   "Armor"
+  ]
+ },
+ "club": {
+  "file": "KnightCharacter/S_Club.usda"
+ },
+ "sword": {
+  "file": "MedievalWeapons/S_Sword.usda"
+ },
+ "spear": {
+  "file": "MedievalWeapons/S_Spear.usda"
+ },
+ "axe": {
+  "file": "MedievalWeapons/S_Axe.usda"
+ },
+ "bow": {
+  "file": "MedievalWeapons/S_BowWooden.usda"
+ },
+ "hammer": {
+  "file": "MedievalWeapons/S_HammerSmall.usda"
+ },
+ "shieldRound": {
+  "file": "MedievalWeapons/S_ShieldRound.usda"
+ },
+ "shieldHeater": {
+  "file": "MedievalWeapons/S_ShieldHeater.usda"
+ },
+ "helmet1": {
+  "file": "KnightCharacter/S_Helmet1.usda"
+ },
+ "helmet2": {
+  "file": "KnightCharacter/S_Helmet2.usda"
+ },
+ "helmet3": {
+  "file": "KnightCharacter/S_Helmet3.usda"
+ },
+ "rifle": {
+  "file": "PirateKit/S_WeaponRifle.usda",
+  "recolor": {
+   "Atlas": [
+    0.18,
+    0.1,
+    0.05
+   ]
+  }
+ },
+ "banner": {
+  "file": "FantasyPropsMegaKit/S_Banner_1.usda",
+  "team": [
+   "MI_Banner"
+  ],
+  "recolor": {
+   "MI_Trim_Furniture": [
+    0.25,
+    0.15,
+    0.07
+   ],
+   "MI_Trim_Metal": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  }
+ }
+}

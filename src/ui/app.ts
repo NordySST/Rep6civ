@@ -302,7 +302,7 @@ export class App {
       this.el.canvas.before(gl);
       this.glCanvas = gl;
       const quality = this.prefs.hq3d === undefined ? mod.defaultQuality() : this.prefs.hq3d ? 'high' : 'low';
-      this.view = new mod.Renderer3D(gl, this.renderer, (c) => new Renderer(c), quality);
+      this.view = new mod.Renderer3D(gl, this.renderer, (c) => new Renderer(c), quality, () => this.invalidate());
       document.body.classList.add('map-3d');
       this.resize();
     } catch (e) {

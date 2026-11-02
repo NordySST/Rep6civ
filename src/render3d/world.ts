@@ -4,7 +4,10 @@ import { CIV_BY_ID } from '../data/civs';
 import { HEX_SIZE, tileCenter } from '../render/renderer';
 import { hexCorner, neighbor } from '../rules/hex';
 import type { GameState } from '../state/types';
+import { Kit } from './models';
+import type { Pack, PackModel } from './pack';
 import { linear, rnd, TerrainField, WATER_LEVEL } from './terrain';
+import { playerEra } from '../rules/victory';
 
 /** Construção das malhas da visão 3D (terreno em blocos, água, rios, árvores e cidades). */
 
@@ -307,7 +310,9 @@ function gable(): THREE.BufferGeometry {
 }
 
 export function citySignature(state: GameState): string {
-  return state.cities.map((c) => `${c.id}:${c.pos}:${c.population}:${c.owner}:${c.isCapital ? 1 : 0}:${c.buildings.includes('walls') ? 1 : 0}`).join('|');
+  return state.cities
+    .map((c) => `${c.id}:${c.pos}:${c.population}:${c.owner}:${c.isCapital ? 1 : 0}:${c.buildings.includes('walls') ? 1 : 0}:${playerEra(state, c.owner).index >= 2 ? 1 : 0}`)
+    .join('|');
 }
 
 interface Piece {
@@ -407,4 +412,143 @@ export function buildCities(field: TerrainField, state: GameState, mat: THREE.Ma
   add(new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), domes);
   add(new THREE.CylinderGeometry(1, 1.1, 1, 8).translate(0, 0.5, 0), towers);
   return group;
+}
+
+// ------------------------------------------------------------------ com modelos importados (Quaternius)
+
+/** Material da cor da equipe por dono (preparado para a névoa). */
+export type TeamMatFor = (owner: number) => THREE.Material;
+
+/** Junta as geometrias por dono: uma malha neutra e uma malha de equipe por civilização. */
+export function meshesFromKits(kits: Map<number, Kit>, neutralMat: THREE.Material, teamMat: TeamMatFor): THREE.Group {
+  const g = new THREE.Group();
+  const neutral: THREE.BufferGeometry[] = [];
+  for (const [owner, k] of kits) {
+    const m = k.build();
+    if (m.neutral) neutral.push(m.neutral);
+    if (m.team) {
+      m.team.computeBoundingSphere();
+      g.add(new THREE.Mesh(m.team, teamMat(owner)));
+    }
+  }
+  if (neutral.length) {
+    const merged = mergeGeometries(neutral);
+    if (merged) {
+      merged.computeBoundingSphere();
+      g.add(new THREE.Mesh(merged, neutralMat));
+    }
+  }
+  return g;
+}
+
+export function buildTreesPack(field: TerrainField, state: GameState, mat: THREE.Material, pack: Pack): THREE.Group | null {
+  const kinds = [pack.get('pine'), pack.get('tree1'), pack.get('tree2')];
+  if (kinds.some((k) => !k?.neutral)) return null;
+  const cities = new Set(state.cities.map((c) => c.pos));
+  const spots: { x: number; y: number; z: number; s: number; r: number; kind: number; tint: number }[] = [];
+  state.map.tiles.forEach((t, i) => {
+    if ((t.feature !== 'forest' && t.feature !== 'jungle') || cities.has(i) || t.district || t.builtWonder) return;
+    const c = tileCenter(state, i);
+    const n = t.feature === 'forest' ? 13 : 11;
+    for (let k = 0; k < n; k++) {
+      const ang = rnd(i, 100 + k) * Math.PI * 2;
+      const rad = S * 0.84 * Math.sqrt(rnd(i, 200 + k));
+      const x = c.x + Math.cos(ang) * rad;
+      const z = c.y + Math.sin(ang) * rad;
+      const y = field.height(x, z) - 0.4;
+      if (y < WATER_LEVEL) continue;
+      spots.push({
+        x,
+        y,
+        z,
+        s: 0.75 + 0.5 * rnd(i, 300 + k),
+        r: rnd(i, 400 + k) * Math.PI * 2,
+        kind: t.feature === 'forest' ? 0 : 1 + (rnd(i, 600 + k) < 0.5 ? 0 : 1),
+        tint: t.terrain === 'tundra' || t.terrain === 'snow' ? 0.75 : 0.88 + 0.24 * rnd(i, 500 + k),
+      });
+    }
+  });
+  const group = new THREE.Group();
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const col = new THREE.Color();
+  kinds.forEach((model, kind) => {
+    const list = spots.filter((p) => p.kind === kind);
+    if (!list.length || !model?.neutral) return;
+    const height = kind === 0 ? 17 : 15;
+    const base = height / (model.max[1] - model.min[1]);
+    const mesh = new THREE.InstancedMesh(model.neutral, mat, list.length);
+    list.forEach((p, k) => {
+      q.setFromAxisAngle(up, p.r);
+      const s = base * p.s;
+      m.compose(new THREE.Vector3(p.x, p.y - model.min[1] * s, p.z), q, new THREE.Vector3(s, s, s));
+      mesh.setMatrixAt(k, m);
+      mesh.setColorAt(k, col.setRGB(p.tint, p.tint, p.tint));
+    });
+    mesh.computeBoundingSphere();
+    group.add(mesh);
+  });
+  return group;
+}
+
+export function buildCitiesPack(field: TerrainField, state: GameState, vcMat: THREE.Material, teamMat: TeamMatFor, pack: Pack): THREE.Group | null {
+  if (!pack.get('townCenter2')) return null;
+  const kits = new Map<number, Kit>();
+  for (const city of state.cities) {
+    const k = kits.get(city.owner) ?? new Kit();
+    kits.set(city.owner, k);
+    const c = tileCenter(state, city.pos);
+    const R = (n: number) => rnd(city.id * 7919, n);
+    const late = playerEra(state, city.owner).index >= 2;
+    const pop = city.population;
+    const centerName = late ? (pop >= 8 ? 'townCenter5' : 'townCenter4') : pop >= 5 ? 'townCenter3' : 'townCenter2';
+    const center = pack.get(centerName);
+    const place = (m: PackModel | undefined, x: number, z: number, size: number, ry: number) => {
+      if (!m) return;
+      const s = size / Math.max(m.max[0] - m.min[0], m.max[2] - m.min[2]);
+      const cx = (m.min[0] + m.max[0]) / 2;
+      const cz = (m.min[2] + m.max[2]) / 2;
+      k.push(x, field.height(x, z) - 0.4, z, ry, s);
+      k.model(m, -cx, -m.min[1], -cz);
+      k.pop();
+    };
+    place(center, c.x, c.y, late ? 34 : 30, Math.round(R(1) * 6) * (Math.PI / 3));
+    if (city.isCapital) {
+      place(pack.get('banner'), c.x + 13, c.y - 9, 7, 0.3);
+      place(pack.get('watchTower'), c.x - 15, c.y - 8, 7, 0);
+    }
+    // casas em volta, mais numerosas com a população
+    const houses = late ? ['houseC', 'houseD', 'houseC'] : ['houseA', 'houseB', 'houseA'];
+    const count = Math.min(3 + pop * 2, 22);
+    const placed: { x: number; z: number }[] = [];
+    for (let n = 0; n < count * 6 && placed.length < count; n++) {
+      const ang = R(n * 3 + 2) * Math.PI * 2;
+      const rad = 18 + (Math.min(S * 1.05, 20 + pop * 2.4) - 18) * Math.sqrt(R(n * 3 + 3));
+      const x = c.x + Math.cos(ang) * rad;
+      const z = c.y + Math.sin(ang) * rad;
+      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < 9)) continue;
+      if (field.height(x, z) < WATER_LEVEL + 0.5) continue;
+      placed.push({ x, z });
+      place(pack.get(houses[Math.floor(R(n * 7) * houses.length)]), x, z, 9 + 3 * R(n * 11), -ang + Math.PI / 2);
+    }
+    if (city.buildings.includes('walls')) {
+      const wall = pack.get(late ? 'wallTowers2' : 'wallTowers1');
+      if (wall) {
+        const rr = S * 0.98;
+        for (let d = 0; d < 6; d++) {
+          const a = hexCorner(c.x, c.y, rr, d);
+          const b = hexCorner(c.x, c.y, rr, d + 1);
+          const mx = (a.x + b.x) / 2;
+          const mz = (a.y + b.y) / 2;
+          const len = Math.hypot(b.x - a.x, b.y - a.y);
+          const s = (len * 1.04) / (wall.max[0] - wall.min[0]);
+          k.push(mx, field.height(mx, mz) - 0.6, mz, -Math.atan2(b.y - a.y, b.x - a.x), s);
+          k.model(wall, -(wall.min[0] + wall.max[0]) / 2, -wall.min[1], -(wall.min[2] + wall.max[2]) / 2);
+          k.pop();
+        }
+      }
+    }
+  }
+  return meshesFromKits(kits, vcMat, teamMat);
 }
