@@ -442,7 +442,19 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   maravilhas mundiais em 5 formas (pirâmide, torre, colosso, cúpula, obeliscos);
   acampamentos bárbaros com tendas e fogueira. Saqueadas ficam tombadas e afundadas.
 - Testes sem WebGL em `tests/render3d.test.ts` (relevo, costura da volta, assinatura, modelos).
-- Próximo: **3D-3** sombras, água animada, nuvens na névoa, desempenho em celulares.
+
+### Visão 3D — Lote 3D-3
+
+- Qualidade (`Quality3D`): **alta** = sombras do sol (mapa 2048, caixa que acompanha a
+  câmera), antisserrilhado, água e nuvens animadas (`uTime`; `MapView.wantsFrame` pede
+  ~20 quadros/s só com Animações ligadas e sem modal aberto); **baixa** = sem sombras,
+  sem animação contínua, terreno com menos vértices e camada do chão de 1024 px. Preferência
+  `hq3d` em Configurações ("Gráficos 3D em alta qualidade"); sem escolha, `defaultQuality`
+  usa memória e núcleos do aparelho. Trocar recria a visão 3D.
+- Sombras respeitam a névoa: `depthMaterialFor` aplica o achatamento (terreno) e o
+  afundamento (árvores, cidades, construções) também no passe de sombra.
+- Inexplorado mostra nuvens (`rep6Clouds`, ruído no shader) em vez de cor chapada; a água
+  ondula e faz espuma no raso (alfa do vértice indica a profundidade).
 
 ## Plano das 8 etapas
 

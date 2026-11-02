@@ -4,7 +4,7 @@ import { HEX_SIZE, nearCenter, type Overlay, type Renderer, worldPeriod } from '
 import type { MapView } from '../render/view';
 import { SQRT3 } from '../rules/hex';
 import type { GameState } from '../state/types';
-import { createSharedUniforms, patchMaterial, type SharedUniforms } from './materials';
+import { createSharedUniforms, depthMaterialFor, patchMaterial, type SharedUniforms } from './materials';
 import { TerrainField, WATER_LEVEL } from './terrain';
 import { buildCities, buildRivers, buildTerrain, buildTrees, buildWater, citySignature } from './world';
 import { unitModel, type Model } from './models';
@@ -22,7 +22,14 @@ import { UNITS } from '../data/units';
  */
 
 const FOV = 35;
-const MAX_DECAL_PX = 2048;
+/** Alta: sombras, água e nuvens animadas, antisserrilhado. Baixa: para aparelhos modestos. */
+export type Quality3D = 'high' | 'low';
+
+/** Qualidade padrão pelo aparelho (memória e núcleos informados pelo navegador). */
+export function defaultQuality(): Quality3D {
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  return (nav.deviceMemory ?? 8) <= 3 || (nav.hardwareConcurrency ?? 8) <= 4 ? 'low' : 'high';
+}
 
 export function webglAvailable(): boolean {
   try {
@@ -65,6 +72,11 @@ export class Renderer3D implements MapView {
   private teamMats = new Map<string, THREE.MeshLambertMaterial>();
   private unitMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   private selRing: THREE.Mesh;
+  private sun: THREE.DirectionalLight;
+  private depthTerrain: THREE.MeshDepthMaterial;
+  private depthSink: THREE.MeshDepthMaterial;
+  private maxDecal: number;
+  private lastFrame = 0;
   private copies: THREE.Group[] = [];
   private field?: TerrainField;
   private terrainSig = -1;
@@ -83,8 +95,15 @@ export class Renderer3D implements MapView {
     glCanvas: HTMLCanvasElement,
     private sprites: Renderer,
     makePainter: (c: HTMLCanvasElement) => Renderer,
+    readonly quality: Quality3D = 'high',
   ) {
-    this.gl = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true, powerPreference: 'high-performance' });
+    const high = quality === 'high';
+    this.maxDecal = high ? 2048 : 1024;
+    this.gl = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: high, powerPreference: 'high-performance' });
+    if (high) {
+      this.gl.shadowMap.enabled = true;
+      this.gl.shadowMap.type = THREE.PCFShadowMap;
+    }
     this.gl.setClearColor(0x0b0f14, 1);
     this.uniforms = createSharedUniforms();
     this.decalTex = new THREE.CanvasTexture(this.decalCanvas);
@@ -111,7 +130,17 @@ export class Renderer3D implements MapView {
     this.scene.add(new THREE.HemisphereLight(0xeaf2ff, 0x4a3f2c, 1.5));
     const sun = new THREE.DirectionalLight(0xfff1d6, 2.1);
     sun.position.set(-0.55, 1, -0.45);
+    this.sun = sun;
     this.scene.add(sun);
+    this.scene.add(sun.target);
+    if (high) {
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = 0.8;
+    }
+    this.depthTerrain = depthMaterialFor(this.uniforms, 'terrain');
+    this.depthSink = depthMaterialFor(this.uniforms, 'sink');
     this.scene.fog = new THREE.Fog(0x22303e, 4000, 9000);
     this.scene.add(this.world);
     this.scene.add(this.unitLayer);
@@ -139,6 +168,8 @@ export class Renderer3D implements MapView {
       m.geometry?.dispose();
     });
     Object.values(this.mats).forEach((m) => m.dispose());
+    this.depthTerrain.dispose();
+    this.depthSink.dispose();
     for (const m of this.models.values()) {
       m.neutral?.dispose();
       m.team?.dispose();
@@ -165,6 +196,30 @@ export class Renderer3D implements MapView {
     const fog = this.scene.fog as THREE.Fog;
     fog.near = dist * 1.7;
     fog.far = dist * 5;
+  }
+
+  /** Sol acompanha a câmera: a caixa de sombra cobre a área vista. */
+  private placeSun(cam: Camera): void {
+    const r = this.decalRegion;
+    const half = Math.min(1500, Math.max(250, r ? Math.max(r.w, r.h) * 0.45 : 600));
+    const dir = new THREE.Vector3(-0.55, 1, -0.45).normalize();
+    this.sun.target.position.set(cam.x, 0, cam.y);
+    this.sun.position.set(cam.x + dir.x * 1500, dir.y * 1500, cam.y + dir.z * 1500);
+    this.sun.target.updateMatrixWorld();
+    if (!this.sun.castShadow) return;
+    const sc = this.sun.shadow.camera;
+    sc.left = -half;
+    sc.right = half;
+    sc.top = half;
+    sc.bottom = -half;
+    sc.near = 100;
+    sc.far = 3200;
+    sc.updateProjectionMatrix();
+  }
+
+  /** Em alta qualidade a água e as nuvens se mexem: pede ~20 quadros/s. */
+  wantsFrame(now: number): boolean {
+    return this.quality === 'high' && now - this.lastFrame > 50;
   }
 
   panScale(cam: Camera): { x: number; y: number } {
@@ -224,7 +279,7 @@ export class Renderer3D implements MapView {
       this.field = new TerrainField(state);
       for (const k of ['terrain', 'water', 'trees'] as const) this.disposeGroup(this.parts[k]);
       if (this.parts.rivers) this.parts.rivers.geometry.dispose();
-      this.parts.terrain = buildTerrain(this.field, this.mats.terrain);
+      this.parts.terrain = buildTerrain(this.field, this.mats.terrain, this.quality === 'high' ? 200000 : 110000);
       this.parts.water = buildWater(this.field, this.mats.water);
       this.parts.rivers = buildRivers(this.field, state, this.mats.river);
       this.parts.trees = buildTrees(this.field, state, this.mats.trees);
@@ -263,9 +318,23 @@ export class Renderer3D implements MapView {
         this.world.add(g);
       }
     }
-    // a água transparente desenha depois do terreno
+    // a água transparente desenha depois do terreno; sombras respeitam a névoa
+    const casters = new Set<THREE.Material>([this.mats.trees, this.mats.city]);
     this.world.traverse((o) => {
-      if ((o as THREE.Mesh).material === this.mats.water) o.renderOrder = 2;
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      if (m.material === this.mats.water) {
+        o.renderOrder = 2;
+        m.receiveShadow = true;
+      } else if (m.material === this.mats.terrain) {
+        m.receiveShadow = true;
+        m.castShadow = true;
+        m.customDepthMaterial = this.depthTerrain;
+      } else if (casters.has(m.material as THREE.Material)) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+        m.customDepthMaterial = this.depthSink;
+      }
     });
   }
 
@@ -358,7 +427,7 @@ export class Renderer3D implements MapView {
       const my = fh * 0.3;
       const w = Math.min(fw + 2 * mx, 6000);
       const h = Math.min(fh + 2 * my, 6000);
-      const scale = Math.min(1.6, MAX_DECAL_PX / Math.max(w, h));
+      const scale = Math.min(1.6, this.maxDecal / Math.max(w, h));
       this.decalRegion = { x: (f.x0 + f.x1) / 2 - w / 2, y: (f.y0 + f.y1) / 2 - h / 2, w, h, scale };
       const cw = Math.ceil(w * scale);
       const ch = Math.ceil(h * scale);
@@ -464,6 +533,7 @@ export class Renderer3D implements MapView {
           const obj = new THREE.Group();
           if (m.neutral) obj.add(new THREE.Mesh(m.neutral, this.unitMat));
           if (m.team) obj.add(new THREE.Mesh(m.team, this.teamMat(u.owner, state)));
+          obj.traverse((o) => (o.castShadow = true));
           const yaw = 0.35 - 0.7 * ((u.id * 0.618) % 1);
           rec = { obj, key, x, z, yaw };
           this.unitObjs.set(u.id, rec);
@@ -511,6 +581,9 @@ export class Renderer3D implements MapView {
     this.updateFog(state, vis, !!overlay.revealAll);
     this.updateDecal(state, vis, overlay);
     this.updateUnits(state, cam, vis, overlay);
+    this.placeSun(cam);
+    this.uniforms.uTime.value = this.quality === 'high' ? performance.now() / 1000 : 0;
+    this.lastFrame = performance.now();
     this.gl.render(this.scene, this.camera);
 
     // figuras em pé no canvas de cima
