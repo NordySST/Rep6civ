@@ -98,7 +98,8 @@ export type Action =
 export type GameEvent =
   | { type: 'error'; message: string }
   | { type: 'cityFounded'; cityId: number; name: string }
-  | { type: 'unitMoved'; unitId: number; from: number; to: number }
+  /** `trail`: hexágonos visitados, em ordem, depois de `from` (animação passo a passo). */
+  | { type: 'unitMoved'; unitId: number; from: number; to: number; trail?: number[] }
   | { type: 'turnStarted'; turn: number }
   | { type: 'info'; message: string }
   | CityEvent
@@ -123,8 +124,8 @@ function findUnit(state: GameState, id: number): Unit | undefined {
   return state.units.find((u) => u.id === id);
 }
 
-/** Avança a unidade pelo caminho guardado enquanto houver movimento. Muta. */
-export function advanceAlongPath(state: GameState, unit: Unit, events?: GameEvent[]): boolean {
+/** Avança a unidade pelo caminho guardado enquanto houver movimento. Muta. `trail` recebe cada hexágono visitado. */
+export function advanceAlongPath(state: GameState, unit: Unit, events?: GameEvent[], trail?: number[]): boolean {
   let moved = false;
   while (unit.path && unit.path.length && unit.movesLeft > 0) {
     const next = unit.path[0];
@@ -141,6 +142,7 @@ export function advanceAlongPath(state: GameState, unit: Unit, events?: GameEven
     }
     moved = true;
     unit.acted = true;
+    trail?.push(unit.pos);
     unit.path.shift();
     revealForPlayer(state, unit.owner);
     const camp = clearCampAt(state, unit);
@@ -166,8 +168,9 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       const from = u.pos;
       u.path = res.path;
       u.skipped = false;
-      advanceAlongPath(state, u, events);
-      events.push({ type: 'unitMoved', unitId: u.id, from, to: u.pos });
+      const trail: number[] = [];
+      advanceAlongPath(state, u, events, trail);
+      events.push({ type: 'unitMoved', unitId: u.id, from, to: u.pos, trail });
       break;
     }
     case 'foundCity': {
@@ -487,7 +490,10 @@ export function endTurn(state: GameState): GameEvent[] {
     u.skipped = false;
   }
   for (const u of state.units) {
-    if (u.path?.length) advanceAlongPath(state, u, events);
+    if (!u.path?.length) continue;
+    const from = u.pos;
+    const trail: number[] = [];
+    if (advanceAlongPath(state, u, events, trail)) events.push({ type: 'unitMoved', unitId: u.id, from, to: u.pos, trail });
   }
   // movimento automático não conta como ação para a cura do próximo turno
   for (const u of state.units) u.acted = false;

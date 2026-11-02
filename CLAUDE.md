@@ -53,7 +53,7 @@ src/
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
-           tutorial.ts (dicas contextuais).
+           tutorial.ts (dicas contextuais), fx.ts (efeitos visuais temporários por relógio).
   ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
            as regras fecham a rodada; `proposeDeal` para propostas do humano), civAi.ts
            (pesquisa, governo, produção, colonos, construtores, militares), diplomacyAi.ts
@@ -377,6 +377,24 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   (`eventMessage(ev, state, viewer)`); quem não está jogando (ou todos, no fim da rodada/
   `passTurn`) recebe na caixa por jogador (`rep6civ.inbox.<semente>` no `localStorage`),
   mostrada como "Enquanto você aguardava" ao começar a vez, antes das propostas.
+
+### Animações
+
+- `ui/fx.ts` (`Fx`): efeitos com início/duração (`performance.now()`), sem tocar no estado:
+  movimento por rota (`move`, salto leve por hexágono, `moveDuration` ≤ ~1 s), investida
+  corpo a corpo (`lunge`), tremor do defensor (`shake`), projéteis com arco e rastro (flecha;
+  pedra para cidades/cerco), textos de dano que saltam, fantasmas de unidades destruídas
+  (inteiros até o impacto, depois somem), anéis (cidade fundada/capturada, acampamento) e
+  clarões de impacto. `frame(now)` alimenta o `Overlay` do renderizador.
+- O evento `unitMoved` traz `trail` (hexágonos visitados, também no movimento automático do
+  fim do turno). `App.queueEffects` monta uma linha do tempo por unidade (anda → ataca →
+  avança), inclusive para IA e bárbaros na virada do turno (sem `trail`, usa `hexLine`);
+  unidades de outros jogadores só animam nos hexágonos que você vê, e nada anima para quem
+  assume a vez no multijogador local.
+- Câmera desliza ao centralizar e no zoom dos botões (`moveCamera`; saltos enormes são
+  instantâneos; arrastar/pinçar cancela). Unidade selecionada pulsa (~20 quadros/s). Faixa
+  "Turno N · ano" no início de cada turno. Tudo respeita a preferência Animações (desligada
+  por padrão com `prefers-reduced-motion`).
 
 ## Plano das 8 etapas
 

@@ -34,9 +34,15 @@ export interface Overlay {
   /** Posições animadas de unidades (coordenadas de mundo). */
   unitPositions?: Map<number, { x: number; y: number }>;
   /** Projéteis de ataques à distância (posição atual em coordenadas de mundo). */
-  projectiles?: { x: number; y: number }[];
+  projectiles?: { x: number; y: number; angle: number; heavy: boolean; tail: { x: number; y: number } }[];
   /** Textos flutuantes (dano etc.). */
-  floaters?: { x: number; y: number; text: string; color: string; alpha: number }[];
+  floaters?: { x: number; y: number; text: string; color: string; alpha: number; size?: number }[];
+  /** Unidades destruídas sumindo. */
+  ghosts?: { type: string; owner: number; x: number; y: number; alpha: number }[];
+  /** Anéis (cidade fundada, acampamento destruído…) e impactos; `t` em [0,1]. */
+  bursts?: { x: number; y: number; color: string; kind: 'ring' | 'impact'; t: number }[];
+  /** Fase [0,1) do pulso da unidade selecionada (sem valor = destaque fixo). */
+  pulse?: number;
   /** Modo de posicionamento de distrito/maravilha: hexágono → rótulo (ex.: "+2"). */
   placement?: { sites: Map<number, string>; chosen?: number };
   /** Hexágonos atacáveis pela seleção atual. */
@@ -132,8 +138,12 @@ export class Renderer {
     this.canvas.height = Math.round(r.height * this.dpr);
   }
 
+  /** Fase do pulso da seleção no quadro atual (ver `Overlay.pulse`). */
+  private pulse?: number;
+
   draw(state: GameState, cam: Camera, vis: Uint8Array, overlay: Overlay): void {
     const { ctx } = this;
+    this.pulse = overlay.pulse;
     const playerId = state.currentPlayer;
     const explored = state.players[playerId].explored;
     const techs = state.players[playerId].techs;
@@ -387,23 +397,27 @@ export class Renderer {
     for (const u of animated) {
       const p = overlay.unitPositions!.get(u.id)!;
       this.drawUnit(state, u.type, u.owner, p.x, p.y + 2, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+      if (u.hp < 100) this.drawHpBar(p.x, p.y + 18, 22, u.hp / 100);
     }
 
-    // projéteis
-    for (const pr of overlay.projectiles ?? []) {
-      ctx.fillStyle = '#ffe9a8';
-      ctx.strokeStyle = '#5a3a00';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(pr.x, pr.y, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+    // unidades destruídas sumindo
+    for (const g of overlay.ghosts ?? []) {
+      if (!state.players[g.owner]) continue;
+      ctx.globalAlpha = Math.max(0, g.alpha);
+      this.drawUnit(state, g.type, g.owner, g.x, g.y + 2, false, false, false);
+      ctx.globalAlpha = 1;
     }
+
+    // anéis e impactos
+    for (const b of overlay.bursts ?? []) this.drawBurst(b);
+
+    // projéteis
+    for (const pr of overlay.projectiles ?? []) this.drawProjectile(pr);
 
     // textos flutuantes
     for (const f of overlay.floaters ?? []) {
       ctx.globalAlpha = Math.max(0, f.alpha);
-      ctx.font = '800 14px system-ui, sans-serif';
+      ctx.font = `800 ${Math.round(f.size ?? 14)}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.lineWidth = 3;
@@ -955,16 +969,115 @@ export class Renderer {
     }
   }
 
+  private drawBurst(b: { x: number; y: number; color: string; kind: 'ring' | 'impact'; t: number }): void {
+    const { ctx } = this;
+    const t = Math.min(1, Math.max(0, b.t));
+    ctx.save();
+    if (b.kind === 'ring') {
+      // dois anéis que se expandem
+      for (const k of [0, 0.25]) {
+        const tt = Math.max(0, (t - k) / (1 - k));
+        if (tt <= 0) continue;
+        ctx.globalAlpha = (1 - tt) * 0.9;
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 3 * (1 - tt) + 1;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 8 + tt * HEX_SIZE * 1.3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      // clarão e faíscas
+      ctx.globalAlpha = (1 - t) * 0.7;
+      ctx.fillStyle = '#fff6d8';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 6 + t * 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      for (let k = 0; k < 8; k++) {
+        const a = (Math.PI * 2 * k) / 8 + 0.4;
+        const r0 = 6 + t * 12;
+        const r1 = r0 + 6 * (1 - t) + 2;
+        ctx.beginPath();
+        ctx.moveTo(b.x + Math.cos(a) * r0, b.y + Math.sin(a) * r0);
+        ctx.lineTo(b.x + Math.cos(a) * r1, b.y + Math.sin(a) * r1);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawProjectile(p: { x: number; y: number; angle: number; heavy: boolean; tail: { x: number; y: number } }): void {
+    const { ctx } = this;
+    ctx.save();
+    // rastro
+    const grad = ctx.createLinearGradient(p.tail.x, p.tail.y, p.x, p.y);
+    grad.addColorStop(0, 'rgba(255, 240, 200, 0)');
+    grad.addColorStop(1, 'rgba(255, 240, 200, 0.7)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = p.heavy ? 4 : 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(p.tail.x, p.tail.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    if (p.heavy) {
+      ctx.fillStyle = '#6b6259';
+      ctx.strokeStyle = '#2b2620';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      // flecha
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      ctx.strokeStyle = '#3b2a14';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-9, 0);
+      ctx.lineTo(2, 0);
+      ctx.stroke();
+      ctx.fillStyle = '#d9d9d9';
+      ctx.beginPath();
+      ctx.moveTo(5, 0);
+      ctx.lineTo(0, -2.6);
+      ctx.lineTo(0, 2.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#f2e6c9';
+      ctx.beginPath();
+      ctx.moveTo(-9, 0);
+      ctx.lineTo(-11, -2.5);
+      ctx.moveTo(-9, 0);
+      ctx.lineTo(-11, 2.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   private drawUnit(state: GameState, type: string, owner: number, x: number, y: number, selected: boolean, hasMoves: boolean, fortified: boolean): void {
     const { ctx } = this;
     const civ = CIV_BY_ID[state.players[owner]?.civId];
     const def = UNITS[type];
     const r = 11;
     if (selected) {
-      ctx.fillStyle = 'rgba(255, 230, 128, 0.45)';
+      const ph = this.pulse === undefined ? 0 : Math.sin(this.pulse * Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 230, 128, ${0.4 + 0.12 * ph})`;
       ctx.beginPath();
-      ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+      ctx.arc(x, y, r + 5 + 1.5 * ph, 0, Math.PI * 2);
       ctx.fill();
+      if (this.pulse !== undefined) {
+        // onda que se afasta
+        ctx.strokeStyle = `rgba(255, 230, 128, ${0.7 * (1 - this.pulse)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 5 + this.pulse * 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     ctx.fillStyle = civ?.color ?? '#888';
     ctx.strokeStyle = civ?.secondaryColor ?? '#fff';

@@ -121,6 +121,16 @@ describe('movimento', () => {
     expect(state.units[0].path).toBeUndefined();
   });
 
+  it('evento unitMoved traz os hexágonos visitados (inclusive no movimento automático)', () => {
+    const s = flatGame();
+    s.units.push({ id: 900, type: 'warrior', owner: 0, pos: 2 * 12 + 1, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
+    const { state, events } = applyAction(s, { type: 'move', unitId: 900, target: 2 * 12 + 7 });
+    const ev = events.find((e) => e.type === 'unitMoved');
+    expect(ev).toMatchObject({ from: 2 * 12 + 1, to: 2 * 12 + 3, trail: [2 * 12 + 2, 2 * 12 + 3] });
+    const next = endTurn(state).find((e) => e.type === 'unitMoved');
+    expect(next).toMatchObject({ unitId: 900, from: 2 * 12 + 3, to: 2 * 12 + 5, trail: [2 * 12 + 4, 2 * 12 + 5] });
+  });
+
   it('desvia de montanhas e não entra em água', () => {
     const s = flatGame();
     for (let r = 0; r < 9; r++) s.map.tiles[r * 12 + 5].terrain = 'mountain';
