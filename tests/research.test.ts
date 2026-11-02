@@ -38,10 +38,16 @@ describe('pesquisa', () => {
     void p;
   });
 
-  it('não pesquisa sem pré-requisitos', () => {
+  it('sem pré-requisitos, a escolha vira destino e começa pelo caminho', () => {
     const { s } = setup();
     const r = applyAction(s, { type: 'setResearch', kind: 'tech', id: 'writing' });
-    expect(r.events[0].type).toBe('error');
+    expect(r.events.some((e) => e.type === 'error')).toBe(false);
+    const p = r.state.players[0];
+    expect(p.researchTarget).toBe('writing');
+    expect(p.researching).not.toBe('writing');
+    // tecnologia já conhecida continua recusada
+    p.techs.push('pottery');
+    expect(applyAction(r.state, { type: 'setResearch', kind: 'tech', id: 'pottery' }).events[0].type).toBe('error');
   });
 
   it('fim de turno acumula ciência do palácio na pesquisa', () => {

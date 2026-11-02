@@ -49,6 +49,7 @@ src/
            diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
            suseranos, território fechado, eliminação), settle.ts (avaliação de locais
            para cidades do ponto de vista do jogador: lente do colono e avisos),
+           unlocks.ts (o que cada tecnologia/cívica libera, derivado dos dados),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom), renderer.ts (arte procedural) e
            view.ts (interface `MapView` comum às visões 2D e 3D).
@@ -61,7 +62,8 @@ src/
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
-           tutorial.ts (dicas contextuais), fx.ts (efeitos visuais temporários por relógio).
+           tutorial.ts (dicas contextuais), fx.ts (efeitos visuais temporários por relógio),
+           icons.ts (ícones SVG próprios), techTree.ts (árvore em grafo).
   ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
            as regras fecham a rodada; `proposeDeal` para propostas do humano), civAi.ts
            (pesquisa, governo, produção, colonos, construtores, militares), diplomacyAi.ts
@@ -475,6 +477,21 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   durante a reprodução aparece "toque para pular" (`playback`), toques e o botão de turno
   pulam, e a seleção da próxima unidade e os diálogos esperam o fim (`afterPlayback`).
   Desligada (padrão): tudo anima ao mesmo tempo, rapidamente.
+
+### Visual — Lote V1 (árvore em grafo e tema)
+
+- Pesquisa com destino: `setResearch` aceita item futuro — vira `researchTarget`/`civicTarget`
+  (opcionais no `Player`, sem migração) e começa pelo primeiro item de `pathTo` (pré-requisitos
+  em ordem válida, mais barato primeiro); `processResearch` segue o caminho sozinho ao
+  concluir cada item. IA continua escolhendo itens disponíveis.
+- `ui/techTree.ts`: colunas por `treeDepth`, ordem por baricentro dos pré-requisitos, faixas
+  de era (tecnologias, por custo) ou de nível (cívicas), ligações SVG (concluídas em bronze,
+  caminho até o destino em azul animado), cartões com estado, progresso, chips do que libera
+  (`unlocksOf`) e eureca/inspiração, número da etapa no caminho e painel de detalhes com
+  "Pesquisar"/"Definir como destino (N etapas)". Modal em tela cheia (`openModal(…, { size: 'full' })`).
+- Tema "Atlas de bronze": fontes OFL empacotadas (`@fontsource/cinzel` títulos,
+  `@fontsource/alegreya-sans` texto; só o subconjunto latino), molduras de bronze, botões com
+  relevo. `ui/icons.ts`: ícones SVG próprios (`icon(nome)`), já usados na barra superior.
 
 ## Plano das 8 etapas
 

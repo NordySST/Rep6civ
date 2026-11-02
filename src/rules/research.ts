@@ -51,11 +51,59 @@ export function availableItems(p: Player, kind: TreeKind): string[] {
   return list.filter((d) => canResearch(p, kind, d.id)).map((d) => d.id);
 }
 
+/**
+ * Caminho até `id`: itens ainda não conhecidos (inclui `id`) em ordem válida — cada um
+ * depois dos seus pré-requisitos; entre os disponíveis, o mais barato primeiro.
+ */
+export function pathTo(p: Player, kind: TreeKind, id: string): string[] {
+  const d = defs(kind);
+  const k = new Set(known(p, kind));
+  if (!d[id] || k.has(id)) return [];
+  const need = new Set<string>();
+  const visit = (x: string) => {
+    if (k.has(x) || need.has(x) || !d[x]) return;
+    need.add(x);
+    d[x].prereqs.forEach(visit);
+  };
+  visit(id);
+  const out: string[] = [];
+  const done = new Set(k);
+  while (need.size) {
+    const ready = [...need].filter((x) => d[x].prereqs.every((r) => done.has(r)));
+    if (!ready.length) break;
+    ready.sort((a, b) => treeCost(p, kind, a) - treeCost(p, kind, b) || a.localeCompare(b));
+    const next = ready[0];
+    out.push(next);
+    done.add(next);
+    need.delete(next);
+  }
+  return out;
+}
+
+/**
+ * Escolhe o que pesquisar. Item disponível: pesquisa direto. Item futuro: vira o destino e
+ * começa pelo primeiro pré-requisito do caminho (os seguintes entram sozinhos).
+ */
 export function setResearch(p: Player, kind: TreeKind, id: string): string | null {
-  if (!canResearch(p, kind, id)) return 'Ainda não disponível.';
-  if (kind === 'tech') p.researching = id;
-  else p.researchingCivic = id;
+  const def = defs(kind)[id];
+  if (!def || known(p, kind).includes(id)) return 'Ainda não disponível.';
+  const path = canResearch(p, kind, id) ? [id] : pathTo(p, kind, id);
+  if (!path.length || !canResearch(p, kind, path[0])) return 'Ainda não disponível.';
+  const target = path.length > 1 ? id : undefined;
+  if (kind === 'tech') {
+    p.researching = path[0];
+    p.researchTarget = target;
+  } else {
+    p.researchingCivic = path[0];
+    p.civicTarget = target;
+  }
   return null;
+}
+
+/** Destino atual (se houver) e o caminho restante até ele. */
+export function targetOf(p: Player, kind: TreeKind): { target?: string; path: string[] } {
+  const target = kind === 'tech' ? p.researchTarget : p.civicTarget;
+  return target ? { target, path: pathTo(p, kind, target) } : { path: [] };
 }
 
 /** Profundidade do item na árvore (0 = sem pré-requisitos), para agrupar na UI. */
@@ -171,6 +219,19 @@ export function processResearch(state: GameState, playerId: number): ResearchEve
         p.researchingCivic = null;
         completeCivic(p, cur, events);
         events.push({ type: 'civicDone', playerId, id: cur });
+      }
+      // segue o caminho até o destino escolhido
+      const target = kind === 'tech' ? p.researchTarget : p.civicTarget;
+      if (target) {
+        const next = pathTo(p, kind, target)[0];
+        if (next && canResearch(p, kind, next)) {
+          if (kind === 'tech') p.researching = next;
+          else p.researchingCivic = next;
+        }
+        if (!next || next === target) {
+          if (kind === 'tech') delete p.researchTarget;
+          else delete p.civicTarget;
+        }
       }
     }
   };
