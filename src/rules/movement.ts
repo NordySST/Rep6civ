@@ -36,7 +36,9 @@ export function stepCost(state: GameState, from: number, to: number, zoc?: Set<n
 
 /** Movimento máximo da unidade (definição + bônus de políticas). */
 export function maxMoves(state: GameState, unit: Unit): number {
-  return UNITS[unit.type].moves + (modifiersFor(state, unit.owner).extraMoves[unit.type] ?? 0) + promotionMoves(unit);
+  // Yrkaan (Estepe sem Fim): +1 de movimento para unidades terrestres que estão em planície
+  const steppe = state.players[unit.owner]?.civId === 'yrkaan' && state.map.tiles[unit.pos]?.terrain === 'plains' ? 1 : 0;
+  return UNITS[unit.type].moves + (modifiersFor(state, unit.owner).extraMoves[unit.type] ?? 0) + promotionMoves(unit) + steppe;
 }
 
 export function hasRoad(state: GameState, idx: number): boolean {

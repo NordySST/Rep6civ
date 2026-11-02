@@ -2,7 +2,9 @@ import { CIV_BY_ID } from '../data/civs';
 import type { ImprovementId } from '../data/improvements';
 import { RESOURCE_BY_ID } from '../data/resources';
 import { TERRAINS } from '../data/terrains';
+import { DISTRICTS, type DistrictId } from '../data/districts';
 import { PROMOTION_XP } from '../data/promotions';
+import { WORLD_WONDER_BY_ID } from '../data/worldWonders';
 import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
 import type { GameState, Tile } from '../state/types';
@@ -29,6 +31,8 @@ export interface Overlay {
     workable: number[];
     buyable: Map<number, number>;
   };
+  /** Modo de posicionamento de distrito/maravilha: hexágono → rótulo (ex.: "+2"). */
+  placement?: { sites: Map<number, string>; chosen?: number };
   /** Hexágonos atacáveis pela seleção atual. */
   attackTargets?: Set<number>;
   /** Alvo com ataque pendente de confirmação. */
@@ -210,10 +214,42 @@ export class Renderer {
       }
     }
 
+    // distritos e maravilhas construídos
+    for (const i of visibleIdx) {
+      const t = state.map.tiles[i];
+      if (t.district) this.drawDistrict(t.district, tileCenter(state, i));
+      if (t.builtWonder) this.drawBuiltWonder(t.builtWonder, tileCenter(state, i), cam.zoom);
+    }
+
     // acampamentos bárbaros conhecidos
     for (const c of state.camps) {
       if (!isKnown(c.pos)) continue;
       this.drawCamp(tileCenter(state, c.pos));
+    }
+
+    // locais válidos para distrito/maravilha
+    if (overlay.placement) {
+      for (const [i, label] of overlay.placement.sites) {
+        const { x, y } = tileCenter(state, i);
+        const chosen = overlay.placement.chosen === i;
+        ctx.fillStyle = chosen ? 'rgba(80, 220, 255, 0.35)' : 'rgba(80, 220, 255, 0.15)';
+        ctx.strokeStyle = chosen ? '#5ff' : 'rgba(80, 220, 255, 0.9)';
+        ctx.lineWidth = chosen ? 4 : 2.5;
+        hexPath(ctx, x, y, HEX_SIZE - 3);
+        ctx.fill();
+        ctx.stroke();
+        if (label) {
+          ctx.font = '700 12px system-ui, sans-serif';
+          const tw = ctx.measureText(label).width + 10;
+          ctx.fillStyle = 'rgba(5, 30, 40, 0.9)';
+          roundRect(ctx, x - tw / 2, y - 22, tw, 15, 6);
+          ctx.fill();
+          ctx.fillStyle = '#9ff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, x, y - 14.5);
+        }
+      }
     }
 
     // alvos de ataque
@@ -480,6 +516,53 @@ export class Renderer {
         ctx.lineTo(b.x, b.y);
       }
       ctx.stroke();
+    }
+  }
+
+  private drawDistrict(id: string, c: { x: number; y: number }): void {
+    const { ctx } = this;
+    const def = DISTRICTS[id as DistrictId];
+    if (!def) return;
+    ctx.fillStyle = 'rgba(20, 24, 30, 0.85)';
+    ctx.strokeStyle = def.color;
+    ctx.lineWidth = 3;
+    hexPath(ctx, c.x, c.y, HEX_SIZE * 0.62);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = '16px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = def.color;
+    ctx.fillText(def.icon, c.x, c.y + 1);
+  }
+
+  private drawBuiltWonder(id: string, c: { x: number; y: number }, zoom: number): void {
+    const { ctx } = this;
+    // monumento dourado estilizado
+    ctx.fillStyle = '#e0b44a';
+    ctx.strokeStyle = '#6b4b00';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(c.x - 14, c.y + 12);
+    ctx.lineTo(c.x - 9, c.y - 4);
+    ctx.lineTo(c.x, c.y - 16);
+    ctx.lineTo(c.x + 9, c.y - 4);
+    ctx.lineTo(c.x + 14, c.y + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff3c4';
+    ctx.fillRect(c.x - 3, c.y - 2, 6, 14);
+    const w = WORLD_WONDER_BY_ID[id];
+    if (w && zoom >= 0.8) {
+      ctx.font = '600 8px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(w.name).width;
+      ctx.fillStyle = 'rgba(30, 20, 0, 0.8)';
+      ctx.fillRect(c.x - tw / 2 - 3, c.y + 14, tw + 6, 11);
+      ctx.fillStyle = '#ffe9a8';
+      ctx.fillText(w.name, c.x, c.y + 19.5);
     }
   }
 

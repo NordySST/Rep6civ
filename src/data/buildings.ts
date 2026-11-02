@@ -15,6 +15,11 @@ export interface BuildingDef {
   needsCoast?: boolean;
   /** Tecnologia/cívica necessária (etapa 3). */
   requiresTech?: string;
+  requiresCivic?: string;
+  /** Distrito exigido na cidade (etapa 6). */
+  district?: string;
+  /** Edifício exigido antes (ex.: Universidade exige Biblioteca). */
+  requiresBuilding?: string;
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -54,6 +59,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   workshop: {
     id: 'workshop',
+    district: 'industrial',
     requiresTech: 'engineering',
     name: 'Oficina',
     cost: 90,
@@ -62,6 +68,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   shrine: {
     id: 'shrine',
+    district: 'holy-site',
     requiresTech: 'astrology',
     name: 'Santuário',
     cost: 70,
@@ -70,6 +77,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   library: {
     id: 'library',
+    district: 'campus',
     requiresTech: 'writing',
     name: 'Biblioteca',
     cost: 90,
@@ -78,11 +86,52 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   market: {
     id: 'market',
+    district: 'commercial',
     requiresTech: 'currency',
     name: 'Mercado',
     cost: 100,
     yields: { gold: 3 },
     description: '+3 Ouro.',
+  },
+  university: {
+    id: 'university',
+    name: 'Universidade',
+    cost: 160,
+    yields: { science: 4 },
+    housing: 1,
+    requiresTech: 'mathematics',
+    district: 'campus',
+    requiresBuilding: 'library',
+    description: '+4 de ciência e +1 de moradia. Exige Biblioteca.',
+  },
+  temple: {
+    id: 'temple',
+    name: 'Templo',
+    cost: 120,
+    yields: { faith: 4 },
+    requiresCivic: 'mysticism',
+    district: 'holy-site',
+    requiresBuilding: 'shrine',
+    description: '+4 de fé. Exige Santuário.',
+  },
+  amphitheater: {
+    id: 'amphitheater',
+    name: 'Anfiteatro',
+    cost: 130,
+    yields: { culture: 3 },
+    requiresCivic: 'drama-poetry',
+    district: 'theater',
+    description: '+3 de cultura.',
+  },
+  barracks: {
+    id: 'barracks',
+    name: 'Quartel',
+    cost: 90,
+    yields: { production: 1 },
+    housing: 1,
+    requiresTech: 'bronze-working',
+    district: 'encampment',
+    description: '+1 de produção e +1 de moradia; unidades treinadas ganham +15 de XP.',
   },
   walls: {
     id: 'walls',
@@ -94,6 +143,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   lighthouse: {
     id: 'lighthouse',
+    district: 'harbor',
     requiresTech: 'sailing',
     name: 'Farol',
     cost: 80,

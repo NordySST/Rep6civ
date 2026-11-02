@@ -6,6 +6,7 @@ import type { City, GameState, Unit } from '../state/types';
 import { assignCitizens } from './cities';
 import { directionTo, distance, neighbors, tilesInRadius } from './hex';
 import { isAtWar } from './diplomacy';
+import { modifiersFor } from './effects';
 import { createRng } from './rng';
 import { riverOnEdge } from './tiles';
 import { computeVisibility } from './visibility';
@@ -166,6 +167,7 @@ export function cityStrength(state: GameState, city: City): number {
   if (city.buildings.includes('walls')) s += 8;
   if (city.isCapital) s += 3;
   if (state.map.tiles[city.pos].hills) s += 3;
+  s += modifiersFor(state, city.owner).cityDefense;
   // guarnição: a melhor unidade militar na cidade reforça a defesa
   const garrison = state.units.filter((x) => x.pos === city.pos && x.owner === city.owner && UNITS[x.type].class === 'military');
   if (garrison.length) s += Math.max(...garrison.map((g) => Math.floor(UNITS[g.type].strength / 4)));

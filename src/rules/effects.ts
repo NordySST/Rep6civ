@@ -1,4 +1,5 @@
 import { GOVERNMENT_BY_ID, GOVERNMENTS, POLICY_BY_ID, type Effect, type SlotType } from '../data/governments';
+import { WORLD_WONDER_BY_ID } from '../data/worldWonders';
 import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { GameState, Player } from '../state/types';
 import { applyCityStateBonuses } from './diplomacy';
@@ -14,6 +15,7 @@ export interface Modifiers {
   builderCharges: number;
   growthPercent: number;
   extraMoves: Record<string, number>;
+  cityDefense: number;
 }
 
 export function emptyModifiers(): Modifiers {
@@ -26,6 +28,7 @@ export function emptyModifiers(): Modifiers {
     builderCharges: 0,
     growthPercent: 0,
     extraMoves: {},
+    cityDefense: 0,
   };
 }
 
@@ -55,6 +58,9 @@ export function applyEffect(m: Modifiers, e: Effect): void {
     case 'extraMoves':
       m.extraMoves[e.unit] = (m.extraMoves[e.unit] ?? 0) + e.amount;
       break;
+    case 'cityDefense':
+      m.cityDefense += e.amount;
+      break;
   }
 }
 
@@ -69,6 +75,11 @@ export function playerModifiers(player: Player | undefined): Modifiers {
 export function modifiersFor(state: GameState, playerId: number): Modifiers {
   const m = playerModifiers(state.players[playerId]);
   applyCityStateBonuses(state, playerId, m);
+  // maravilhas mundiais do jogador
+  for (const c of state.cities) {
+    if (c.owner !== playerId) continue;
+    for (const w of c.wonders) for (const e of WORLD_WONDER_BY_ID[w]?.effects ?? []) applyEffect(m, e);
+  }
   return m;
 }
 

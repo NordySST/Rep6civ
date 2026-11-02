@@ -119,6 +119,12 @@ export const MIGRATIONS: MigrationTable = {
     diplomacy: s.diplomacy ?? {},
     proposals: s.proposals ?? [],
   }),
+  // v5 → v6 (etapa 6): distritos e maravilhas. Edifícios antigos que hoje exigem
+  // distrito continuam valendo (direitos adquiridos).
+  5: (s) => ({
+    ...s,
+    cities: s.cities.map((c: any) => ({ districts: [], wonders: [], ...c })),
+  }),
 };
 
 export class SaveError extends Error {}

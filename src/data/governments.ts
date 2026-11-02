@@ -17,7 +17,8 @@ export type Effect =
   | { type: 'tilePurchaseDiscount'; percent: number }
   | { type: 'builderCharges'; amount: number }
   | { type: 'growthPercent'; percent: number }
-  | { type: 'extraMoves'; unit: string; amount: number };
+  | { type: 'extraMoves'; unit: string; amount: number }
+  | { type: 'cityDefense'; amount: number };
 
 export interface GovernmentDef {
   id: string;

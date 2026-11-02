@@ -179,6 +179,9 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
     case 'enqueue': {
       const c = state.cities.find((x) => x.id === action.cityId);
       if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      if ((action.item.kind === 'district' || action.item.kind === 'wonder') && action.item.tile === undefined) {
+        return fail('Escolha o hexágono no mapa.');
+      }
       const why = cannotProduce(state, c, action.item);
       if (why) return fail(why);
       if (c.queue.some((q) => itemKey(q) === itemKey(action.item)) && action.item.kind === 'building') {

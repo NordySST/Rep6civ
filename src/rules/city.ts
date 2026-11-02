@@ -58,6 +58,8 @@ export function foundCity(state: GameState, unit: Unit): City {
     cultureStored: 0,
     cultureTiles: 0,
     hp: 200,
+    districts: [],
+    wonders: [],
   };
   if (city.isCapital) city.buildings.push('palace');
   p.citiesFounded++;
