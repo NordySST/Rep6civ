@@ -18,7 +18,14 @@ import { canOccupy, findPath } from '../rules/movement';
 import { availableItems, treeCost } from '../rules/research';
 import { isPassableLand } from '../rules/tiles';
 import { canEnterTerrain } from '../rules/movement';
-import { availableFollowerBeliefs, availablePantheons, availableReligionNames, cannotFoundReligion, religionOf } from '../rules/religion';
+import {
+  availableFollowerBeliefs,
+  availablePantheons,
+  availableReligionNames,
+  cannotFoundReligion,
+  cannotTheology,
+  religionOf,
+} from '../rules/religion';
 import { routesOf, tradeCapacity, tradeDestinations } from '../rules/trade';
 import { PANTHEON_COST } from '../data/religion';
 import type { City, GameState, ProductionItem, Unit } from '../state/types';
@@ -523,6 +530,7 @@ export function aiUnits(state: GameState, id: number, events: GameEvent[]): void
     if (def.canFoundCity) runSettler(state, id, u, events);
     else if (def.charges) runBuilder(state, id, u, events);
     else if (def.trader) runTrader(state, id, u, events);
+    else if (def.inquisitor) runInquisitor(state, id, u, events);
     else if (def.spreads) runMissionary(state, id, u, events);
     else if (def.greatPerson) runGreatPerson(state, id, u, events);
     else if (def.domain === 'sea') runNaval(state, id, u, events);
@@ -548,7 +556,33 @@ function runTrader(state: GameState, id: number, u: Unit, events: GameEvent[]): 
   if (home) moveToward(state, id, u, home.pos, events);
 }
 
+function runInquisitor(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
+  const targets = state.cities.filter(
+    (c) => c.owner === id && Object.keys(c.pressure).some((r) => r !== u.religion && c.pressure[r] > 0),
+  );
+  if (!targets.length) {
+    if (!theologyNearby(state, id, u, events) && !u.fortified) act(state, id, { type: 'skipUnit', unitId: u.id }, events);
+    return;
+  }
+  const t = targets.reduce((a, b) => (distance(state.map, u.pos, b.pos) < distance(state.map, u.pos, a.pos) ? b : a));
+  if (distance(state.map, u.pos, t.pos) <= 1) {
+    act(state, id, { type: 'purgeHeresy', unitId: u.id, cityId: t.id }, events);
+    return;
+  }
+  moveToward(state, id, u, t.pos, events, true);
+}
+
+/** Apóstolo/inquisidor ataca unidade religiosa rival adjacente. */
+function theologyNearby(state: GameState, id: number, u: Unit, events: GameEvent[]): boolean {
+  for (const n of neighbors(state.map, u.pos)) {
+    if (n < 0 || cannotTheology(state, u, n)) continue;
+    return act(state, id, { type: 'theology', unitId: u.id, target: n }, events);
+  }
+  return false;
+}
+
 function runMissionary(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
+  if (u.type === 'apostle' && theologyNearby(state, id, u, events)) return;
   const targets = state.cities.filter((c) => c.religion !== u.religion && distance(state.map, u.pos, c.pos) <= 12);
   if (!targets.length) return;
   const t = targets.reduce((a, b) => (distance(state.map, u.pos, b.pos) < distance(state.map, u.pos, a.pos) ? b : a));
@@ -606,9 +640,18 @@ export function aiFaith(state: GameState, id: number, events: GameEvent[]): void
   }
   const rel = religionOf(state, id);
   const missionaries = count(state, id, (u) => u.type === 'missionary');
-  if (rel && missionaries < 2 && p.faith >= (UNITS.missionary.faithCost ?? 80) + 20) {
-    const city = state.cities.find((c) => c.owner === id && c.religion === rel.id);
-    if (city) act(state, id, { type: 'buyWithFaith', cityId: city.id, unit: 'missionary' }, events);
+  const home = rel ? state.cities.find((c) => c.owner === id && c.religion === rel.id) : undefined;
+  if (rel && home) {
+    const heresy = state.cities.some((c) => c.owner === id && c.religion && c.religion !== rel.id);
+    const inquisitors = count(state, id, (u) => u.type === 'inquisitor');
+    const apostles = count(state, id, (u) => u.type === 'apostle');
+    if (heresy && !inquisitors && p.faith >= (UNITS.inquisitor.faithCost ?? 90)) {
+      act(state, id, { type: 'buyWithFaith', cityId: home.id, unit: 'inquisitor' }, events);
+    } else if (apostles < 1 && p.faith >= (UNITS.apostle.faithCost ?? 140) + 20) {
+      act(state, id, { type: 'buyWithFaith', cityId: home.id, unit: 'apostle' }, events);
+    } else if (missionaries < 2 && p.faith >= (UNITS.missionary.faithCost ?? 80) + 20) {
+      act(state, id, { type: 'buyWithFaith', cityId: home.id, unit: 'missionary' }, events);
+    }
   }
 }
 

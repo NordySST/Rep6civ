@@ -85,7 +85,12 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
 - **Hexágonos:** pointy-top, offset "odd-r". Direções/arestas: 0=L, 1=SE, 2=SO, 3=O, 4=NO, 5=NE.
   Aresta i fica entre os cantos i e i+1; a aresta i de A é a (i+3)%6 do vizinho. Rios são uma
   máscara de 6 bits por hexágono, sempre gravada dos dois lados (`setRiverEdge`).
-- **Mapa sem wrap** horizontal (decisão da etapa 1; pode ser revista).
+- **Mapa cilíndrico** (Lote D): novos mapas têm `map.wrap = true` (volta leste-oeste; só os
+  polos são borda). Toda geometria passa por `rules/hex.ts` (`neighbor`, `distance`,
+  `tilesInRadius`, `hexLine`, `wrapCol`), que respeita `dims.wrap`; nunca compare colunas
+  diretamente para adjacência/distância. Saves antigos e `flatGame()` não têm volta. O
+  renderizador desenha as cópias vizinhas (`worldPeriod`) e usa `nearCenter` para traçar
+  linhas que atravessam a emenda (rotas, estradas, animações).
 - **Saves:** envelope `{ format, version, savedAt, meta, state }` em `localStorage`
   (`rep6civ.save.<slot>`; slots `auto`, `slot1..3`). Ao mudar o formato: incremente
   `SCHEMA_VERSION`, adicione `MIGRATIONS[versãoAnterior]` e um teste em `tests/save.test.ts`.
@@ -353,6 +358,21 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   religião recebem metade da pressão estrangeira. Simulações (mapa pequeno, IA em todas as
   civilizações) terminam com vitórias religiosas, culturais e por pontuação entre os turnos
   ~140 e 250; a IA completa a árvore perto do turno 250.
+
+### Pós-etapas — Lote D
+
+- Disputa religiosa: Apóstolo (140 de fé; difunde com 150 e força religiosa 30) e
+  Inquisidor (90 de fé; "Remover heresia" apaga outras religiões de uma cidade sua, 3 usos).
+  Combate teológico entre unidades religiosas de religiões diferentes (dano como no combate
+  comum, +5 em território da própria religião); o perdedor some e sua religião perde 25% da
+  pressão nas cidades a ≤ 6, o vencedor ganha +25. Unidades religiosas atravessam fronteiras
+  fechadas. IA compra inquisidor quando há heresia e mantém um apóstolo.
+- Mapa com volta leste-oeste (ver Convenções): ruído contínuo na emenda, continentes podem
+  atravessá-la, oceano forçado só nos polos.
+- Multijogador local: até 4 humanos (formulário "Jogadores neste aparelho"); `passTurn` passa
+  a vez ao próximo humano e a tela de passagem esconde o mapa; o último humano fecha a
+  rodada (`playEndTurn`, que recomeça pelo primeiro humano ativo). Propostas entre humanos
+  ficam pendentes e são respondidas na vez do outro.
 
 ## Plano das 8 etapas
 

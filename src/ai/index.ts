@@ -26,6 +26,9 @@ export function playEndTurn(prev: GameState): ActionResult {
   }
   state.currentPlayer = human;
   events.push(...endTurn(state));
+  // nova rodada começa pelo primeiro humano ativo (multijogador local)
+  const first = state.players.find((p) => p.isHuman && !p.eliminated);
+  if (first) state.currentPlayer = first.id;
   events.push({ type: 'turnStarted', turn: state.turn });
   return { state, events };
 }

@@ -21,6 +21,8 @@ export interface NewGameOptions {
   /** Nº de cidades-estado (padrão do tamanho do mapa). */
   cityStates?: number;
   turnLimit?: number;
+  /** Civilizações de jogadores humanos adicionais (multijogador local). */
+  extraHumans?: string[];
 }
 
 export const DEFAULT_TURN_LIMIT = 250;
@@ -96,7 +98,13 @@ export function newGame(opts: NewGameOptions): GameState {
   const rng = createRng(`${opts.seed}|players`);
   const rivalCount = Math.max(0, Math.min(CIVS.length - 1, opts.rivals ?? size.rivals));
   const csCount = Math.max(0, Math.min(CITY_STATES.length, opts.cityStates ?? size.cityStates));
-  const rivals = rng.shuffle(CIVS.filter((c) => c.id !== civId)).slice(0, rivalCount);
+  const humanCivs = [civId];
+  for (const extra of opts.extraHumans ?? []) {
+    const id = CIVS.some((c) => c.id === extra) && !humanCivs.includes(extra) ? extra : CIVS.find((c) => !humanCivs.includes(c.id))!.id;
+    humanCivs.push(id);
+    state.players.push(makePlayer(state.players.length, id, n, { isHuman: true }));
+  }
+  const rivals = rng.shuffle(CIVS.filter((c) => !humanCivs.includes(c.id))).slice(0, Math.min(rivalCount, CIVS.length - humanCivs.length));
   const cityStates = rng.shuffle([...CITY_STATES]).slice(0, csCount);
   for (const r of rivals) state.players.push(makePlayer(state.players.length, r.id, n));
   for (const cs of cityStates) state.players.push(makePlayer(state.players.length, cs.id, n, { isCityState: true, envoys: {} }));

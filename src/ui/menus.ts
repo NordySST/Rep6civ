@@ -45,6 +45,8 @@ export interface NewGameChoice {
   rivals?: number;
   cityStates?: number;
   turnLimit?: number;
+  /** Civilizações dos jogadores humanos adicionais (multijogador local). */
+  extraHumans?: string[];
 }
 
 export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Partial<NewGameChoice>): HTMLElement {
@@ -62,6 +64,54 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
   let rivals: number | undefined = defaults?.rivals;
   let cityStates: number | undefined = defaults?.cityStates;
   let turnLimit = defaults?.turnLimit ?? 250;
+  const extraHumans: string[] = [...(defaults?.extraHumans ?? [])];
+  const humansBox = h('div', { class: 'form' });
+  const renderHumans = () => {
+    clear(humansBox);
+    humansBox.append(
+      h(
+        'div',
+        { class: 'counter' },
+        h('span', {}, T.humanPlayers),
+        h('button', { class: 'btn icon', 'aria-label': `${T.humanPlayers} −`, onclick: () => (extraHumans.pop(), renderHumans()) }, '−'),
+        h('strong', {}, String(1 + extraHumans.length)),
+        h(
+          'button',
+          {
+            class: 'btn icon',
+            'aria-label': `${T.humanPlayers} +`,
+            onclick: () => {
+              if (extraHumans.length >= 3) return;
+              const used = new Set([civId, ...extraHumans]);
+              extraHumans.push(CIVS.find((c) => !used.has(c.id))!.id);
+              renderHumans();
+            },
+          },
+          '+',
+        ),
+      ),
+    );
+    extraHumans.forEach((cid, k) => {
+      humansBox.append(
+        h(
+          'div',
+          { class: 'slot-row' },
+          h('span', { class: 'slot-tag wildcard' }, T.playerN(k + 2)),
+          h(
+            'select',
+            {
+              class: 'policy-select',
+              'aria-label': T.playerN(k + 2),
+              onchange: (e: Event) => (extraHumans[k] = (e.target as HTMLSelectElement).value),
+            },
+            ...CIVS.map((c) => h('option', { value: c.id, selected: c.id === cid }, `${c.name} — ${c.leaderTitle} ${c.leader}`)),
+          ),
+        ),
+      );
+    });
+    if (extraHumans.length) humansBox.append(h('small', { class: 'muted' }, T.hotseatHint));
+  };
+  renderHumans();
   const countsRow = h('div', { class: 'counts' });
   const counter = (label: string, get: () => number, set: (n: number) => void, max: number) =>
     h(
@@ -152,6 +202,8 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
     sizeRow,
     h('label', { class: 'field-label' }, T.opponents),
     countsRow,
+    h('label', { class: 'field-label' }, T.localPlayers),
+    humansBox,
     h('label', { class: 'field-label' }, T.seed),
     h(
       'div',
@@ -160,6 +212,7 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
       h('button', { class: 'btn', onclick: () => (seedInput.value = randomSeedString()) }, '🎲 ' + T.randomSeed),
     ),
     h('label', { class: 'field-label' }, T.civilization),
+    h('small', { class: 'muted' }, T.player1Hint),
     civList,
     h(
       'button',
@@ -173,6 +226,7 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
             rivals: rivals ?? MAP_SIZES[size].rivals,
             cityStates: cityStates ?? MAP_SIZES[size].cityStates,
             turnLimit,
+            extraHumans: extraHumans.filter((c, k) => c !== civId && extraHumans.indexOf(c) === k),
           }),
       },
       T.start,

@@ -5,8 +5,8 @@ import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
 import { YIELD_KEYS, YIELD_LABELS } from '../data/yields';
 import { clampCamera, clampZoom, type Camera, zoomAt } from '../render/camera';
-import { Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
-import { applyAction, unitsNeedingOrders, type Action, type ActionResult } from '../rules/actions';
+import { nearCenter, Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
+import { activeHumans, applyAction, nextHuman, unitsNeedingOrders, type Action, type ActionResult } from '../rules/actions';
 import { playEndTurn, proposeDeal } from '../ai';
 import { unitStrength } from '../ai/common';
 import {
@@ -70,10 +70,13 @@ import {
   availableReligionNames,
   canBuyMissionary,
   cannotFoundReligion,
+  cannotPurge,
+  cannotTheology,
+  religiousStrength,
   religionOf,
 } from '../rules/religion';
 import { routesOf, routeYields, tradeCapacity, tradeDestinations } from '../rules/trade';
-import { distance } from '../rules/hex';
+import { distance, neighbors } from '../rules/hex';
 import { FOLLOWER_BY_ID, PANTHEON_BY_ID, PANTHEON_COST, RELIGION_NAME_BY_ID } from '../data/religion';
 import { GREAT_PERSON_TYPES } from '../data/greatPeople';
 import { adjacencyBonus, districtLimit, districtSites, wonderSites } from '../rules/districts';
@@ -265,6 +268,12 @@ export class App {
   private clampCam(c: Camera): Camera {
     if (!this.state) return c;
     const ws = worldSize(this.state);
+    if (this.state.map.wrap) {
+      // volta leste-oeste: x circula, só y é limitado
+      const P = ws.w;
+      const cl = clampCamera({ ...c, zoom: clampZoom(c.zoom) }, P, ws.h);
+      return { ...cl, x: ((c.x % P) + P) % P };
+    }
     return clampCamera({ ...c, zoom: clampZoom(c.zoom) }, ws.w, ws.h);
   }
 
@@ -296,7 +305,8 @@ export class App {
         const from = before.get(u.id);
         if (from === undefined || from === u.pos) continue;
         const d = distance(s.map, from, u.pos);
-        this.anims.push({ unitId: u.id, from: tileCenter(s, from), to: tileCenter(s, u.pos), start: now, dur: Math.min(450, 120 + d * 90) });
+        const fc = tileCenter(s, from);
+        this.anims.push({ unitId: u.id, from: fc, to: nearCenter(s, u.pos, fc), start: now, dur: Math.min(450, 120 + d * 90) });
       }
     }
     let sfx: Sfx | null = endTurn ? 'endTurn' : null;
@@ -306,7 +316,7 @@ export class App {
           const c = tileCenter(s, ev.pos);
           if (this.prefs.animations) {
             const ranged = ev.attackerType === 'city' || !!UNITS[ev.attackerType]?.rangedStrength;
-            const from = tileCenter(s, ev.from);
+            const from = nearCenter(s, ev.from, c);
             // impacto aparece depois do golpe/projétil
             const delay = ranged ? 260 : 160;
             this.floaters.push({ x: c.x, y: c.y - 8, text: `−${ev.damageToTarget}`, color: '#ff6b5b', start: now + delay });
@@ -417,6 +427,9 @@ export class App {
         return hasMet(s, s.currentPlayer, ev.player) ? T.eliminatedMsg(playerName(s, ev.player)) : null;
       case 'envoyGained':
         return ev.player === s.currentPlayer ? T.envoyGained : null;
+      case 'theology':
+        if (ev.attacker !== s.currentPlayer && ev.defender !== s.currentPlayer) return null;
+        return T.theologyMsg(religionLabel(ev.winnerReligion), religionLabel(ev.loserReligion));
       case 'disbanded':
         return ev.player === s.currentPlayer ? T.disbandedMsg(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
       case 'routeCreated':
@@ -636,8 +649,9 @@ export class App {
     rivals?: number,
     cityStates?: number,
     turnLimit?: number,
+    extraHumans?: string[],
   ): void {
-    const s = newGame({ seed, mapSize, civId, rivals, cityStates, turnLimit });
+    const s = newGame({ seed, mapSize, civId, rivals, cityStates, turnLimit, extraHumans });
     this.selectedUnitId = undefined;
     this.selectedTile = undefined;
     this.pendingPath = undefined;
@@ -742,8 +756,21 @@ export class App {
   }
 
   private endTurn(): void {
+    if (!this.state) return;
+    // multijogador local: passa a vez ao próximo humano antes de fechar a rodada
+    if (nextHuman(this.state) !== null) {
+      if (!this.dispatch({ type: 'passTurn' })) return;
+      this.autosave();
+      this.showHandoff();
+      return;
+    }
     if (!this.dispatch({ type: 'endTurn' }) || !this.state) return;
     this.autosave();
+    if (activeHumans(this.state).length === 0) return this.showGameOver();
+    if (activeHumans(this.state).length > 1) {
+      this.showHandoff();
+      return;
+    }
     this.selectedCityId = undefined;
     if (!this.selectNextUnit()) this.selectUnit(undefined);
     const me = this.state.players[this.state.currentPlayer];
@@ -1013,7 +1040,28 @@ export class App {
       );
       if (!s.cities.some((c) => c.pos === u.pos && c.owner === u.owner)) extraInfo.push(h('small', { class: 'muted' }, T.traderHint));
     }
-    if (def.spreads && u.religion) {
+    if (def.inquisitor && u.religion) {
+      for (const c of s.cities.filter((c) => distance(s.map, u.pos, c.pos) <= 1 && !cannotPurge(s, u, c.id))) {
+        actions.unshift(
+          h('button', { class: 'btn primary', onclick: () => this.unitAction({ type: 'purgeHeresy', unitId: u.id, cityId: c.id }) }, `⚖ ${T.purgeIn(c.name)}`),
+        );
+      }
+    }
+    if (u.religion && def.religiousStrength) {
+      for (const n of neighbors(s.map, u.pos)) {
+        if (n < 0 || cannotTheology(s, u, n)) continue;
+        const foe = s.units.find((x) => x.pos === n && x.religion && x.religion !== u.religion)!;
+        actions.unshift(
+          h(
+            'button',
+            { class: 'btn danger', onclick: () => this.unitAction({ type: 'theology', unitId: u.id, target: n }) },
+            `📖 ${T.theologyVs(UNITS[foe.type].name, religiousStrength(s, u), religiousStrength(s, foe))}`,
+          ),
+        );
+      }
+      extraInfo.push(h('small', {}, `📖 ${T.religiousStrengthLabel}: ${religiousStrength(s, u)} · ❤ ${u.hp}`));
+    }
+    if (def.spreads && !def.inquisitor && u.religion) {
       for (const c of s.cities.filter((c) => distance(s.map, u.pos, c.pos) <= 1 && c.religion !== u.religion)) {
         actions.unshift(
           h('button', { class: 'btn primary', onclick: () => this.unitAction({ type: 'spreadReligion', unitId: u.id, cityId: c.id }) }, `☦ ${T.spreadIn(c.name)}`),
@@ -1202,18 +1250,18 @@ export class App {
       ...(this.pendingAttack !== undefined ? [h('button', { class: 'btn danger', onclick: () => this.confirmAttack() }, '🏹 ' + T.attack)] : []),
       h('button', { class: `btn ${item ? '' : 'primary'}`, onclick: () => this.showProduction() }, '⚒ ' + T.production),
       ...(c.religion && religionOf(s, c.owner)
-        ? [
+        ? ['missionary', 'apostle', 'inquisitor'].map((uid) =>
             h(
               'button',
               {
                 class: 'btn',
-                disabled: !!canBuyMissionary(s, c),
-                title: canBuyMissionary(s, c) ?? '',
-                onclick: () => this.dispatch({ type: 'buyWithFaith', cityId: c.id, unit: 'missionary' }) && this.renderHud(),
+                disabled: !!canBuyMissionary(s, c, uid),
+                title: canBuyMissionary(s, c, uid) ?? '',
+                onclick: () => this.dispatch({ type: 'buyWithFaith', cityId: c.id, unit: uid }) && this.renderHud(),
               },
-              `☦ ${T.buyMissionary(UNITS.missionary.faithCost ?? 80)}`,
+              `${UNITS[uid].glyph} ${T.buyFaithUnit(UNITS[uid].name, UNITS[uid].faithCost ?? 0)}`,
             ),
-          ]
+          )
         : []),
       h(
         'button',
@@ -1971,6 +2019,50 @@ export class App {
     );
   }
 
+  /** Tela de passagem de vez (esconde o mapa até o próximo jogador tocar). */
+  private showHandoff(): void {
+    const s = this.state!;
+    const p = s.players[s.currentPlayer];
+    const civ = CIV_BY_ID[p.civId];
+    this.selectedUnitId = undefined;
+    this.selectedCityId = undefined;
+    this.selectedTile = undefined;
+    this.pendingPath = undefined;
+    this.pendingAttack = undefined;
+    this.placement = undefined;
+    const host = this.modalHost();
+    this.el.modal.classList.add('handoff');
+    openModal(
+      host,
+      T.handoffTitle,
+      h(
+        'div',
+        { class: 'menu-list' },
+        h('div', { class: 'dip-head', style: `--civ:${civ?.color};--civ2:${civ?.secondaryColor}` }, h('span', { class: 'civ-swatch' }), h('strong', {}, `${civ?.name} — ${civ?.leaderTitle} ${civ?.leader}`)),
+        h('p', {}, T.handoffText(s.turn)),
+        h(
+          'button',
+          {
+            class: 'btn primary wide',
+            onclick: () => {
+              this.el.modal.classList.remove('handoff');
+              closeModal(host);
+              this.setState(s);
+              if (!this.selectNextUnit()) this.centerOnSelection();
+              const w = s.winner;
+              if (w && !this.victoryShown) {
+                this.victoryShown = true;
+                this.showVictory();
+              } else if (s.proposals.some((x) => x.to === s.currentPlayer)) this.showProposals();
+            },
+          },
+          '▶ ' + T.startTurn,
+        ),
+      ),
+      { closable: false },
+    );
+  }
+
   private showPromotions(u: Unit): void {
     const host = this.modalHost();
     const body = h(
@@ -2233,7 +2325,7 @@ export class App {
     const form = newGameForm((c) => {
       if (closable && this.state && !confirm(T.confirmNewGame)) return;
       closeModal(host);
-      this.startNewGame(c.seed, c.mapSize, c.civId, c.rivals, c.cityStates, c.turnLimit);
+      this.startNewGame(c.seed, c.mapSize, c.civId, c.rivals, c.cityStates, c.turnLimit, c.extraHumans);
     }, this.state ? { mapSize: this.state.settings.mapSize, civId: this.state.players[0].civId } : undefined);
     if (!closable) {
       form.prepend(h('button', { class: 'btn', onclick: () => this.showMainMenu(!!readSlotInfo(AUTOSAVE_SLOT)) }, '← Voltar'));

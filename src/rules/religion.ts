@@ -120,17 +120,101 @@ export function spreadPressure(state: GameState): ReligionEvent[] {
   return events;
 }
 
-export function canBuyMissionary(state: GameState, city: City): string | null {
+/** Pode comprar a unidade religiosa (missionário, apóstolo, inquisidor) com fé nesta cidade? */
+export function canBuyMissionary(state: GameState, city: City, unitId = 'missionary'): string | null {
   const p = state.players[city.owner];
+  const def = UNITS[unitId];
+  if (!def?.faithCost) return 'Esta unidade não é comprada com fé.';
   if (!religionOf(state, city.owner)) return 'Você precisa ter fundado uma religião.';
   if (!city.religion) return 'A cidade não segue nenhuma religião.';
-  const cost = UNITS.missionary.faithCost ?? 80;
-  if (p.faith < cost) return `Exige ${cost} de fé.`;
+  if (def.inquisitor && city.religion !== religionOf(state, city.owner)!.id) return 'A cidade precisa seguir a sua religião.';
+  if (p.faith < def.faithCost) return `Exige ${def.faithCost} de fé.`;
   return null;
 }
 
+// ------------------------------------------------------------------ disputa religiosa
+
+export const THEOLOGY_LOSS = 0.25;
+export const THEOLOGY_RADIUS = 6;
+
+export function isReligiousUnit(u: Unit): boolean {
+  return !!UNITS[u.type]?.religiousStrength;
+}
+
+/** Força religiosa: base + 5 se estiver em território cuja cidade segue a sua religião. */
+export function religiousStrength(state: GameState, u: Unit): number {
+  let s = UNITS[u.type]?.religiousStrength ?? 0;
+  const t = state.map.tiles[u.pos];
+  const city = state.cities.find((c) => c.id === t.cityId);
+  if (city && city.religion === u.religion) s += 5;
+  return Math.max(1, s - Math.round((100 - u.hp) / 10));
+}
+
+export function cannotTheology(state: GameState, u: Unit, targetPos: number): string | null {
+  if (!isReligiousUnit(u) || !u.religion) return 'Apenas unidades religiosas.';
+  if (UNITS[u.type].id !== 'apostle' && !UNITS[u.type].inquisitor) return 'Só apóstolos e inquisidores travam combate teológico.';
+  if (u.movesLeft <= 0) return 'Sem movimentos restantes.';
+  if (distance(state.map, u.pos, targetPos) !== 1) return 'O alvo precisa estar adjacente.';
+  const t = state.units.find((x) => x.pos === targetPos && isReligiousUnit(x) && x.religion && x.religion !== u.religion);
+  if (!t) return 'Não há unidade de outra religião aí.';
+  return null;
+}
+
+export type TheologyEvent = { type: 'theology'; attacker: number; defender: number; winnerReligion: string; loserReligion: string; pos: number };
+
+/** Combate teológico (muta): dano como no combate comum; o perdedor some e sua religião perde pressão por perto. */
+export function theologicalCombat(state: GameState, u: Unit, targetPos: number, roll: () => number): string | TheologyEvent[] {
+  const why = cannotTheology(state, u, targetPos);
+  if (why) return why;
+  const t = state.units.find((x) => x.pos === targetPos && isReligiousUnit(x) && x.religion && x.religion !== u.religion)!;
+  const a = religiousStrength(state, u);
+  const d = religiousStrength(state, t);
+  const dmg = (diff: number) => Math.max(1, Math.round(30 * Math.exp(diff / 25) * (0.8 + 0.4 * roll())));
+  t.hp -= dmg(a - d);
+  u.hp -= dmg(d - a);
+  u.movesLeft = 0;
+  const events: TheologyEvent[] = [];
+  const settle = (loser: Unit, winner: Unit) => {
+    state.units = state.units.filter((x) => x.id !== loser.id);
+    for (const c of state.cities) {
+      if (distance(state.map, c.pos, loser.pos) > THEOLOGY_RADIUS) continue;
+      if (c.pressure[loser.religion!]) c.pressure[loser.religion!] *= 1 - THEOLOGY_LOSS;
+      c.pressure[winner.religion!] = (c.pressure[winner.religion!] ?? 0) + 25;
+    }
+    events.push({ type: 'theology', attacker: u.owner, defender: t.owner, winnerReligion: winner.religion!, loserReligion: loser.religion!, pos: targetPos });
+  };
+  if (t.hp <= 0) settle(t, u);
+  if (u.hp <= 0) settle(u, t);
+  return events;
+}
+
+/** Inquisidor remove a pressão de outras religiões de uma cidade sua (adjacente ou nela). */
+export function cannotPurge(state: GameState, u: Unit, cityId: number): string | null {
+  if (!UNITS[u.type]?.inquisitor) return 'Apenas inquisidores.';
+  if ((u.charges ?? 0) <= 0) return 'Sem usos restantes.';
+  const city = state.cities.find((c) => c.id === cityId);
+  if (!city || city.owner !== u.owner) return 'Só nas suas cidades.';
+  if (distance(state.map, u.pos, city.pos) > 1) return 'O inquisidor precisa estar na cidade ou ao lado dela.';
+  if (!Object.keys(city.pressure).some((r) => r !== u.religion && city.pressure[r] > 0)) return 'Não há outras religiões aqui.';
+  return null;
+}
+
+export function purgeHeresy(state: GameState, u: Unit, cityId: number): string | ReligionEvent[] {
+  const why = cannotPurge(state, u, cityId);
+  if (why) return why;
+  const city = state.cities.find((c) => c.id === cityId)!;
+  for (const r of Object.keys(city.pressure)) if (r !== u.religion) delete city.pressure[r];
+  city.pressure[u.religion!] = Math.max(city.pressure[u.religion!] ?? 0, CONVERT_MIN);
+  u.charges = (u.charges ?? 1) - 1;
+  u.movesLeft = 0;
+  if (u.charges <= 0) state.units = state.units.filter((x) => x.id !== u.id);
+  const before = city.religion;
+  city.religion = u.religion;
+  return before !== u.religion ? [{ type: 'cityConverted', cityId, religion: u.religion! }] : [];
+}
+
 export function cannotSpread(state: GameState, u: Unit, cityId: number): string | null {
-  if (!UNITS[u.type]?.spreads || !u.religion) return 'Apenas missionários.';
+  if (!UNITS[u.type]?.spreads || UNITS[u.type]?.inquisitor || !u.religion) return 'Apenas missionários e apóstolos.';
   if ((u.charges ?? 0) <= 0) return 'Sem usos restantes.';
   const city = state.cities.find((c) => c.id === cityId);
   if (!city) return 'Cidade inválida.';
@@ -143,7 +227,7 @@ export function spreadReligion(state: GameState, u: Unit, cityId: number): strin
   const why = cannotSpread(state, u, cityId);
   if (why) return why;
   const city = state.cities.find((c) => c.id === cityId)!;
-  city.pressure[u.religion!] = (city.pressure[u.religion!] ?? 0) + MISSIONARY_PRESSURE;
+  city.pressure[u.religion!] = (city.pressure[u.religion!] ?? 0) + (UNITS[u.type].spreadPressure ?? MISSIONARY_PRESSURE);
   u.charges = (u.charges ?? 1) - 1;
   u.movesLeft = 0;
   if (u.charges <= 0) state.units = state.units.filter((x) => x.id !== u.id);

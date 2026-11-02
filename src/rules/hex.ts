@@ -37,6 +37,15 @@ export function axialToOffset(q: number, r: number): { col: number; row: number 
 export interface MapDims {
   width: number;
   height: number;
+  /** Mapa cilíndrico: a coluna 0 é vizinha da última (volta leste-oeste). */
+  wrap?: boolean;
+}
+
+/** Normaliza a coluna (com volta, se o mapa der a volta). */
+export function wrapCol(dims: MapDims, col: number): number {
+  if (!dims.wrap) return col;
+  const w = dims.width;
+  return ((col % w) + w) % w;
 }
 
 export function idxOf(dims: MapDims, col: number, row: number): number {
@@ -57,7 +66,8 @@ export function neighbor(dims: MapDims, idx: number, dir: number): number {
   const a = offsetToAxial(col, row);
   const d = AXIAL_DIRS[((dir % 6) + 6) % 6];
   const o = axialToOffset(a.q + d.q, a.r + d.r);
-  return inBounds(dims, o.col, o.row) ? idxOf(dims, o.col, o.row) : -1;
+  const nc = wrapCol(dims, o.col);
+  return inBounds(dims, nc, o.row) ? idxOf(dims, nc, o.row) : -1;
 }
 
 /** Os 6 vizinhos (−1 para fora do mapa), na ordem das direções. */
@@ -73,14 +83,31 @@ export function directionTo(dims: MapDims, a: number, b: number): number {
   return -1;
 }
 
+function axialDistance(A: Axial, B: Axial): number {
+  const dq = A.q - B.q;
+  const dr = A.r - B.r;
+  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
+
+/** Coluna de `b` (possivelmente fora de [0, largura)) da cópia mais próxima de `a`. */
+function nearestCol(dims: MapDims, aCol: number, bCol: number): number {
+  if (!dims.wrap) return bCol;
+  const w = dims.width;
+  let best = bCol;
+  for (const c of [bCol - w, bCol + w]) if (Math.abs(c - aCol) < Math.abs(best - aCol)) best = c;
+  return best;
+}
+
 export function distance(dims: MapDims, a: number, b: number): number {
   const pa = colRow(dims, a);
   const pb = colRow(dims, b);
   const A = offsetToAxial(pa.col, pa.row);
-  const B = offsetToAxial(pb.col, pb.row);
-  const dq = A.q - B.q;
-  const dr = A.r - B.r;
-  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+  if (!dims.wrap) return axialDistance(A, offsetToAxial(pb.col, pb.row));
+  let best = Infinity;
+  for (const c of [pb.col - dims.width, pb.col, pb.col + dims.width]) {
+    best = Math.min(best, axialDistance(A, offsetToAxial(c, pb.row)));
+  }
+  return best;
 }
 
 /** Todos os índices a até `radius` de `center` (inclui o centro). */
@@ -93,10 +120,11 @@ export function tilesInRadius(dims: MapDims, center: number, radius: number): nu
     const r2 = Math.min(radius, -dq + radius);
     for (let dr = r1; dr <= r2; dr++) {
       const o = axialToOffset(c.q + dq, c.r + dr);
-      if (inBounds(dims, o.col, o.row)) out.push(idxOf(dims, o.col, o.row));
+      const oc = wrapCol(dims, o.col);
+      if (inBounds(dims, oc, o.row)) out.push(idxOf(dims, oc, o.row));
     }
   }
-  return out;
+  return dims.wrap ? [...new Set(out)] : out;
 }
 
 function cubeRound(q: number, r: number): Axial {
@@ -118,7 +146,7 @@ export function hexLine(dims: MapDims, a: number, b: number): number[] {
   const pa = colRow(dims, a);
   const pb = colRow(dims, b);
   const A = offsetToAxial(pa.col, pa.row);
-  const B = offsetToAxial(pb.col, pb.row);
+  const B = offsetToAxial(nearestCol(dims, pa.col, pb.col), pb.row);
   const out: number[] = [];
   for (let i = 0; i <= n; i++) {
     const t = n === 0 ? 0 : i / n;
@@ -127,7 +155,7 @@ export function hexLine(dims: MapDims, a: number, b: number): number[] {
     const r = A.r + (B.r - A.r) * t + 1e-6;
     const h = cubeRound(q, r);
     const o = axialToOffset(h.q, h.r);
-    out.push(idxOf(dims, o.col, o.row));
+    out.push(idxOf(dims, wrapCol(dims, o.col), o.row));
   }
   return out;
 }

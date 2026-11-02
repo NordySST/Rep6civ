@@ -89,7 +89,7 @@ export function canEnterTerrain(state: GameState, unit: Unit, idx: number): bool
 
 export function canOccupy(state: GameState, unit: Unit, to: number): boolean {
   if (!canEnterTerrain(state, unit, to)) return false;
-  if (!canEnterTerritory(state, unit.owner, state.map.tiles[to].owner)) return false;
+  if (!UNITS[unit.type].religiousStrength && !canEnterTerritory(state, unit.owner, state.map.tiles[to].owner)) return false;
   const cls = UNITS[unit.type].class;
   for (const o of state.units) {
     if (o.pos !== to || o.id === unit.id) continue;
@@ -226,7 +226,7 @@ export function findPath(state: GameState, unit: Unit, target: number, opts: Pat
       if (!known(nb)) cost = 1;
       else {
         if (!canEnterTerrain(state, unit, nb) && !(nb === target && opts.allowEnemyGoal)) continue;
-        if (!canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
+        if (!UNITS[unit.type].religiousStrength && !canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
         // unidades bloqueiam apenas como destino final ou se forem de outro dono
         if (nb !== target) {
           const enemy = state.units.some((o) => o.pos === nb && o.owner !== unit.owner);
@@ -267,7 +267,7 @@ export function reachableThisTurn(state: GameState, unit: Unit): Set<number> {
       if (state.units.some((o) => o.pos === nb && o.owner !== unit.owner)) continue;
       if (state.cities.some((c) => c.pos === nb && c.owner !== unit.owner)) continue;
       if (!canEnterTerrain(state, unit, nb)) continue;
-      if (!canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
+      if (!UNITS[unit.type].religiousStrength && !canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
       const rest = Math.max(0, left - stepCost(state, cur, nb, zoc, unit));
       if (rest > (best.get(nb) ?? -1)) {
         best.set(nb, rest);

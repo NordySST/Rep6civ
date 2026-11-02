@@ -19,6 +19,8 @@ export interface MapGenOptions {
   size: MapSizeId;
   /** Fração aproximada de terra (0..1). */
   landRatio?: number;
+  /** Mapa cilíndrico (volta leste-oeste). Padrão: sim. */
+  wrap?: boolean;
 }
 
 export interface GeneratedMap {
@@ -45,24 +47,35 @@ export function generateMap(opts: MapGenOptions): GeneratedMap {
     return { x: col + 0.5 * (row & 1), y: row * 0.866 };
   };
 
+  const wrap = opts.wrap ?? true;
+  /** fBm contínuo na emenda leste-oeste: mistura a amostra com a do período anterior. */
+  const sfbm = (noise: ReturnType<typeof createNoise2D>, x: number, y: number, div: number, oct: number) => {
+    if (!wrap) return noise.fbm(x / div, y / div, oct);
+    const t = x / width;
+    return noise.fbm(x / div, y / div, oct) * (1 - t) + noise.fbm((x - width) / div, y / div, oct) * t;
+  };
+
   // --- 1. Elevação: fBm + núcleos continentais + borda oceânica ---
   const centers = Array.from({ length: size.continents }, () => ({
-    x: rng.range(width * 0.15, width * 0.85),
+    x: wrap ? rng.range(0, width) : rng.range(width * 0.15, width * 0.85),
     y: rng.range(height * 0.2, height * 0.8) * 0.866,
     r: rng.range(0.18, 0.3) * Math.min(width, height * 1.4),
   }));
   const elevation = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const { x, y } = px(i);
-    const f = elevNoise.fbm(x / 9, y / 9, 5);
+    const f = sfbm(elevNoise, x, y, 9, 5);
     let blob = 0;
     for (const c of centers) {
-      const d = Math.hypot(x - c.x, y - c.y) / c.r;
+      let dx = Math.abs(x - c.x);
+      if (wrap) dx = Math.min(dx, width - dx);
+      const d = Math.hypot(dx, y - c.y) / c.r;
       blob = Math.max(blob, 1 - d);
     }
     let e = 0.55 * f + 0.45 * Math.max(0, blob);
     const { col, row } = colRow({ width, height }, i);
-    const edge = Math.min(col, width - 1 - col, row, height - 1 - row);
+    // com volta leste-oeste, só os polos (norte/sul) viram oceano
+    const edge = wrap ? Math.min(row, height - 1 - row) : Math.min(col, width - 1 - col, row, height - 1 - row);
     const margin = 3;
     if (edge < margin) e -= (1 - edge / margin) * 0.6;
     elevation[i] = e;
@@ -79,7 +92,7 @@ export function generateMap(opts: MapGenOptions): GeneratedMap {
     tiles[i] = { terrain: land ? 'grassland' : 'ocean', hills: false, rivers: 0 };
     if (land) landIdx.push(i);
   }
-  const map: GameMap = { width, height, tiles };
+  const map: GameMap = { width, height, tiles, wrap };
 
   // remove ilhotas de 1 hexágono (ficam estranhas) e lagos de 1 hexágono
   for (let i = 0; i < n; i++) {
@@ -93,8 +106,8 @@ export function generateMap(opts: MapGenOptions): GeneratedMap {
   for (let i = 0; i < n; i++) if (isLand(tiles[i])) landIdx.push(i);
 
   // ranks de elevação entre terras (0..1)
-  const elevRank = rankOf(landIdx, (i) => elevation[i] + 0.25 * hillNoise.fbm(px(i).x / 4, px(i).y / 4, 3));
-  const moistRank = rankOf(landIdx, (i) => moistNoise.fbm(px(i).x / 7, px(i).y / 7, 4));
+  const elevRank = rankOf(landIdx, (i) => elevation[i] + 0.25 * sfbm(hillNoise, px(i).x, px(i).y, 4, 3));
+  const moistRank = rankOf(landIdx, (i) => sfbm(moistNoise, px(i).x, px(i).y, 7, 4));
 
   // --- 3. Relevo: montanhas e colinas ---
   for (const i of landIdx) {
@@ -109,7 +122,7 @@ export function generateMap(opts: MapGenOptions): GeneratedMap {
     const { row } = colRow(map, i);
     const lat = Math.abs(row - (height - 1) / 2) / ((height - 1) / 2);
     const { x, y } = px(i);
-    temperature[i] = 1 - lat + (tempNoise.fbm(x / 6, y / 6, 3) - 0.5) * 0.3 - (tiles[i].hills ? 0.04 : 0);
+    temperature[i] = 1 - lat + (sfbm(tempNoise, x, y, 6, 3) - 0.5) * 0.3 - (tiles[i].hills ? 0.04 : 0);
   }
   for (const i of landIdx) {
     const t = tiles[i];
@@ -276,7 +289,7 @@ function wonderFits(map: GameMap, i: number, w: NaturalWonderDef, temperature: F
   if (w.needsCoastAdjacent && !neighbors(map, i).some((x) => x >= 0 && isWater(map.tiles[x]))) return false;
   // maravilhas de água precisam estar perto de terra; de terra não na borda do mapa
   const { col, row } = colRow(map, i);
-  if (col < 2 || row < 2 || col > map.width - 3 || row > map.height - 3) return false;
+  if (row < 2 || row > map.height - 3 || (!map.wrap && (col < 2 || col > map.width - 3))) return false;
   return true;
 }
 
@@ -374,7 +387,7 @@ export function findStartPositions(map: GameMap, count: number, seed: string, mi
   const scored: { i: number; s: number }[] = [];
   for (let i = 0; i < map.tiles.length; i++) {
     const { col, row } = colRow(map, i);
-    if (col < 3 || row < 3 || col > map.width - 4 || row > map.height - 4) continue;
+    if (row < 3 || row > map.height - 4 || (!map.wrap && (col < 3 || col > map.width - 4))) continue;
     const s = scoreStart(map, i);
     if (s > -Infinity) scored.push({ i, s: s + rng.next() * 2 });
   }
