@@ -530,6 +530,14 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   fora do mapa a névoa é sempre "inexplorado": o vazio virou um mar de nuvens.
 - Luz: mapeamento de tons fílmico (ACES, exposição 1,02), sol mais quente e céu azulado.
 
+### Visual — Lote V4 (ícones na interface)
+
+- `ui/icons.ts`: ~60 ícones SVG próprios (24×24, `currentColor`) e `richText(texto)`, que troca
+  os emojis conhecidos (tabela `EMOJI`: emoji → ícone + classe de cor) por ícones. `h()` em
+  `ui/dom.ts` aplica isso a todo texto de interface (exceto `option`/`textarea`) e o aviso
+  (`toast`) também — novos textos podem continuar usando emojis nos `strings.ts`/dados; o que
+  não estiver na tabela aparece como está. O mapa (canvas) mantém seus glifos.
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),

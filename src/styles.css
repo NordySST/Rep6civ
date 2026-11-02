@@ -727,3 +727,18 @@ html, body { font-family: var(--font-body); font-size: 16px; }
 .y-production { color: #e8924a; }
 .res .ic { width: 1.15em; height: 1.15em; }
 .btn.icon .ic { width: 24px; height: 24px; }
+/* cores dos ícones da interface */
+.y-housing { color: #d9c7a3; }
+.y-amenity { color: #ff8fa3; }
+.i-strength { color: #e6e9ee; }
+.i-health { color: #ff6b6b; }
+.i-shield { color: #9fb7cf; }
+.i-parch { color: #e8d9b0; }
+.i-peace { color: #dff3ff; }
+.i-war { color: #ff7a4d; }
+.i-warn { color: #ffcc4d; }
+.i-ok { color: #7cfc8a; }
+.i-gold { color: var(--title); }
+.btn .ic { width: 1.2em; height: 1.2em; }
+.btn.primary .icw { color: inherit; }
+.btn.primary .icw .ic { filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.35)); }
