@@ -1,9 +1,11 @@
 import { CIV_BY_ID } from '../data/civs';
+import type { ImprovementId } from '../data/improvements';
 import { RESOURCE_BY_ID } from '../data/resources';
 import { TERRAINS } from '../data/terrains';
 import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
 import type { GameState, Tile } from '../state/types';
+import { tileYields } from '../rules/tiles';
 import { colRow, hexCorner, hexToPixel, neighbor, pixelToOffset, SQRT3 } from '../rules/hex';
 import { type Camera, screenToWorld, worldToScreen } from './camera';
 
@@ -18,6 +20,16 @@ export interface Overlay {
   pathTurns?: number;
   /** Mostra tudo sem névoa (depuração). */
   revealAll?: boolean;
+  /** Visão de gestão de cidade. */
+  cityView?: {
+    cityId: number;
+    worked: Set<number>;
+    locked: Set<number>;
+    workable: number[];
+    buyable: Map<number, number>;
+  };
+  /** Informação de cidades para os estandartes (crescimento/produção). */
+  cityInfo?: Map<number, { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number }>;
 }
 
 export function worldSize(state: GameState) {
@@ -152,8 +164,17 @@ export class Renderer {
     }
     ctx.stroke();
 
-    // fronteiras
-    this.drawBorders(state, visibleIdx);
+    // estradas (centros de cidade contam como estrada)
+    this.drawRoads(state, visibleIdx, isKnown);
+
+    // melhorias
+    if (detail) {
+      for (const i of visibleIdx) {
+        const t = state.map.tiles[i];
+        if (t.improvement) this.drawImprovement(t.improvement as ImprovementId, tileCenter(state, i));
+      }
+    }
+
 
     // recursos e maravilhas
     if (detail) {
@@ -175,12 +196,16 @@ export class Renderer {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
       ctx.lineWidth = 1.5;
       for (const i of overlay.reachable) {
+        if (!isKnown(i)) continue;
         const { x, y } = tileCenter(state, i);
         hexPath(ctx, x, y, HEX_SIZE - 3);
         ctx.fill();
         ctx.stroke();
       }
     }
+
+    // fronteiras (acima da névoa e do destaque de alcance)
+    this.drawBorders(state, visibleIdx);
 
     // grade sutil em zoom alto
     if (cam.zoom >= 0.9) {
@@ -193,10 +218,13 @@ export class Renderer {
       }
     }
 
+    // visão da cidade: rendimentos, cidadãos e hexágonos à venda
+    if (overlay.cityView) this.drawCityView(state, overlay.cityView);
+
     // cidades
     for (const c of state.cities) {
       if (!isKnown(c.pos)) continue;
-      this.drawCity(state, c.pos, c.name, c.population, c.owner, c.isCapital);
+      this.drawCity(state, c.pos, c.name, c.population, c.owner, c.isCapital, overlay.cityInfo?.get(c.id));
     }
 
     // unidades (de outros jogadores só se visíveis)
@@ -416,7 +444,184 @@ export class Renderer {
     }
   }
 
-  private drawCity(state: GameState, pos: number, name: string, pop: number, owner: number, capital: boolean): void {
+  private drawRoads(state: GameState, idxs: number[], isKnown: (i: number) => boolean): void {
+    const { ctx } = this;
+    const cityAt = new Set(state.cities.map((c) => c.pos));
+    const road = (i: number) => !!state.map.tiles[i].road || cityAt.has(i);
+    ctx.strokeStyle = 'rgba(120, 82, 45, 0.9)';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const i of idxs) {
+      if (!road(i)) continue;
+      const a = tileCenter(state, i);
+      let linked = false;
+      for (let d = 0; d < 6; d++) {
+        const n = neighbor(state.map, i, d);
+        if (n < 0 || !road(n) || !isKnown(n)) continue;
+        linked = true;
+        if (n < i && idxs.includes(n)) continue;
+        const b = tileCenter(state, n);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+      if (!linked && !cityAt.has(i)) {
+        ctx.moveTo(a.x - 8, a.y + 6);
+        ctx.lineTo(a.x + 8, a.y - 6);
+      }
+    }
+    ctx.stroke();
+  }
+
+  private drawImprovement(id: ImprovementId, c: { x: number; y: number }): void {
+    const { ctx } = this;
+    const x = c.x;
+    const y = c.y;
+    ctx.lineWidth = 1.6;
+    switch (id) {
+      case 'farm': {
+        ctx.fillStyle = 'rgba(214, 190, 90, 0.85)';
+        ctx.strokeStyle = 'rgba(120, 95, 30, 0.9)';
+        ctx.beginPath();
+        ctx.rect(x - 14, y + 2, 28, 14);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        for (let k = 1; k < 4; k++) {
+          ctx.moveTo(x - 14 + k * 7, y + 2);
+          ctx.lineTo(x - 14 + k * 7, y + 16);
+        }
+        ctx.stroke();
+        break;
+      }
+      case 'mine':
+      case 'quarry': {
+        ctx.fillStyle = id === 'mine' ? '#3b3b3b' : '#b9b3a6';
+        ctx.beginPath();
+        ctx.arc(x - 8, y + 10, 6, Math.PI, 0);
+        ctx.fill();
+        ctx.strokeStyle = '#5b3a1a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + 2, y + 16);
+        ctx.lineTo(x + 12, y + 2);
+        ctx.moveTo(x + 6, y + 1);
+        ctx.quadraticCurveTo(x + 13, y - 1, x + 17, y + 6);
+        ctx.stroke();
+        break;
+      }
+      case 'pasture': {
+        ctx.strokeStyle = '#7a5530';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let k = 0; k < 4; k++) {
+          ctx.moveTo(x - 14 + k * 9, y + 4);
+          ctx.lineTo(x - 14 + k * 9, y + 16);
+        }
+        ctx.moveTo(x - 15, y + 8);
+        ctx.lineTo(x + 14, y + 8);
+        ctx.moveTo(x - 15, y + 13);
+        ctx.lineTo(x + 14, y + 13);
+        ctx.stroke();
+        break;
+      }
+      case 'plantation': {
+        ctx.fillStyle = '#2f7d32';
+        for (let k = 0; k < 3; k++) {
+          for (let j = 0; j < 2; j++) {
+            ctx.beginPath();
+            ctx.arc(x - 10 + k * 10, y + 5 + j * 8, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        break;
+      }
+      case 'camp': {
+        ctx.fillStyle = '#c9a26b';
+        ctx.strokeStyle = '#5b3a1a';
+        ctx.beginPath();
+        ctx.moveTo(x - 10, y + 16);
+        ctx.lineTo(x - 2, y + 2);
+        ctx.lineTo(x + 6, y + 16);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        break;
+      }
+    }
+  }
+
+  private drawCityView(state: GameState, v: NonNullable<Overlay['cityView']>): void {
+    const { ctx } = this;
+    for (const i of v.workable) {
+      const { x, y } = tileCenter(state, i);
+      if (v.worked.has(i)) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+        hexPath(ctx, x, y, HEX_SIZE - 2);
+        ctx.fill();
+      }
+      this.drawYieldPips(tileYields(state.map.tiles[i]), x, y);
+      if (v.worked.has(i)) {
+        ctx.fillStyle = v.locked.has(i) ? '#ffd23f' : '#ffffff';
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y - 16, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+    for (const [i, cost] of v.buyable) {
+      const { x, y } = tileCenter(state, i);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      hexPath(ctx, x, y, HEX_SIZE - 2);
+      ctx.fill();
+      this.drawYieldPips(tileYields(state.map.tiles[i]), x, y);
+      ctx.fillStyle = 'rgba(40, 30, 5, 0.9)';
+      roundRect(ctx, x - 15, y - 22, 30, 13, 5);
+      ctx.fill();
+      ctx.fillStyle = '#ffd76a';
+      ctx.font = '700 9px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${cost}🪙`, x, y - 15);
+    }
+  }
+
+  private drawYieldPips(y: { food: number; production: number; gold: number; science: number; culture: number; faith: number }, x: number, cy: number): void {
+    const { ctx } = this;
+    const items: [number, string][] = [
+      [y.food, '#7cc94a'],
+      [y.production, '#d9822b'],
+      [y.gold, '#f2c230'],
+      [y.science + y.culture + y.faith, '#7fb7ff'],
+    ];
+    const shown = items.filter(([n]) => n > 0);
+    const w = shown.length * 13;
+    let px = x - w / 2 + 6.5;
+    ctx.font = '700 9px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const [n, color] of shown) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, cy + 4, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#111';
+      ctx.fillText(String(n), px, cy + 4.5);
+      px += 13;
+    }
+  }
+
+  private drawCity(
+    state: GameState,
+    pos: number,
+    name: string,
+    pop: number,
+    owner: number,
+    capital: boolean,
+    info?: { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number },
+  ): void {
     const { ctx } = this;
     const { x, y } = tileCenter(state, pos);
     const civ = CIV_BY_ID[state.players[owner]?.civId];
@@ -461,6 +666,22 @@ export class Renderer {
     ctx.textBaseline = 'middle';
     ctx.fillText(String(pop), bx + 5, by + 8.5);
     ctx.fillText(label, bx + 18, by + 8.5);
+    if (info) {
+      // barra de produção
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(bx + 2, by + 16, bw - 4, 4);
+      ctx.fillStyle = info.prodName ? '#f0a442' : '#e74c3c';
+      ctx.fillRect(bx + 2, by + 16, (bw - 4) * (info.prodName ? Math.min(1, info.prodFrac) : 1), 4);
+      ctx.font = '600 8px system-ui, sans-serif';
+      const sub = info.prodName ? `${info.prodName} (${info.prodTurns})` : 'Escolher produção';
+      const sw = ctx.measureText(sub).width + 8;
+      ctx.fillStyle = 'rgba(15, 18, 24, 0.85)';
+      roundRect(ctx, x - sw / 2, by + 21, sw, 11, 4);
+      ctx.fill();
+      ctx.fillStyle = info.prodName ? '#f6d9a8' : '#ff9a8a';
+      ctx.textAlign = 'center';
+      ctx.fillText(sub, x, by + 26.5);
+    }
   }
 
   private drawUnit(state: GameState, type: string, owner: number, x: number, y: number, selected: boolean, hasMoves: boolean, fortified: boolean): void {

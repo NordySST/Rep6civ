@@ -1,3 +1,4 @@
+import { ROAD_MOVE_COST } from '../data/improvements';
 import { UNITS } from '../data/units';
 import type { GameState, Unit } from '../state/types';
 import { directionTo, distance, neighbor } from './hex';
@@ -19,8 +20,14 @@ export function stepCost(state: GameState, from: number, to: number): number {
   if (!isFinite(base)) return Infinity;
   const dir = directionTo(map, from, to);
   if (dir < 0) return Infinity;
+  // estradas (centros de cidade contam como estrada) ignoram terreno e rios
+  if (hasRoad(state, from) && hasRoad(state, to)) return ROAD_MOVE_COST;
   if (riverOnEdge(map.tiles[from], dir)) return Math.max(base, RIVER_CROSSING_COST);
   return base;
+}
+
+export function hasRoad(state: GameState, idx: number): boolean {
+  return !!state.map.tiles[idx].road || state.cities.some((c) => c.pos === idx);
 }
 
 /** Marcador: cruzar rio custa "tudo" (limitado ao movimento restante na prática). */

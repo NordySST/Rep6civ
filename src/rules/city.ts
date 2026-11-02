@@ -2,6 +2,7 @@ import { CIV_BY_ID } from '../data/civs';
 import { UNITS } from '../data/units';
 import type { City, GameState, Unit } from '../state/types';
 import { distance, tilesInRadius } from './hex';
+import { assignCitizens } from './cities';
 import { isPassableLand } from './tiles';
 
 /** Distância mínima entre centros de cidades (em hexágonos). */
@@ -47,7 +48,17 @@ export function foundCity(state: GameState, unit: Unit): City {
     population: 1,
     foundedTurn: state.turn,
     isCapital: !state.cities.some((c) => c.owner === unit.owner),
+    foodStored: 0,
+    queue: [],
+    progress: {},
+    worked: [],
+    locked: [],
+    focus: 'balanced',
+    buildings: [],
+    cultureStored: 0,
+    cultureTiles: 0,
   };
+  if (city.isCapital) city.buildings.push('palace');
   p.citiesFounded++;
   state.cities.push(city);
   for (const i of tilesInRadius(state.map, unit.pos, INITIAL_TERRITORY_RADIUS)) {
@@ -57,11 +68,13 @@ export function foundCity(state: GameState, unit: Unit): City {
       t.cityId = city.id;
     }
   }
-  // remove recursos de "feature" sob o centro? (Civ remove florestas/pântanos)
+  // o centro da cidade perde floresta/selva/pântano e melhorias
   const center = state.map.tiles[unit.pos];
-  if (center.feature === 'marsh' || center.feature === 'jungle' || center.feature === 'forest') {
-    delete center.feature;
-  }
+  delete center.feature;
+  delete center.improvement;
+  center.owner = unit.owner;
+  center.cityId = city.id;
   state.units = state.units.filter((u) => u.id !== unit.id);
+  assignCitizens(state, city);
   return city;
 }

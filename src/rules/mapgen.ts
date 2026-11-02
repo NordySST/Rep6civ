@@ -141,7 +141,9 @@ export function generateMap(opts: MapGenOptions): GeneratedMap {
     const temp = temperature[i];
     if (!t.hills && t.terrain === 'grassland' && m > 0.8 && er < 0.3 && rng.chance(0.55)) {
       t.feature = 'marsh';
-    } else if (temp > 0.68 && m > 0.58 && FEATURES.jungle.allowedTerrains.includes(t.terrain) && rng.chance(0.7)) {
+    } else if (temp > 0.68 && m > 0.58 && (t.terrain === 'grassland' || t.terrain === 'plains') && rng.chance(0.7)) {
+      // selva tropical fica sobre planície (como floresta úmida)
+      t.terrain = 'plains';
       t.feature = 'jungle';
     } else if (m > 0.42 && FEATURES.forest.allowedTerrains.includes(t.terrain) && rng.chance(t.terrain === 'tundra' ? 0.55 : 0.42)) {
       t.feature = 'forest';

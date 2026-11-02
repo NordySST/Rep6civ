@@ -40,6 +40,25 @@ export const MIGRATIONS: MigrationTable = {
     schemaVersion: 1,
     players: (s.players ?? []).map((p: any) => ({ citiesFounded: 0, ...p })),
   }),
+  // v1 → v2 (etapa 2): estoques do jogador e gestão de cidades.
+  // Cidadãos ficam sem hexágonos; rules/cityState.normalizeState os distribui ao carregar.
+  1: (s) => ({
+    ...s,
+    players: s.players.map((p: any) => ({ gold: 10, science: 0, culture: 0, faith: 0, ...p })),
+    cities: s.cities.map((c: any) => ({
+      foodStored: 0,
+      queue: [],
+      progress: {},
+      worked: [],
+      locked: [],
+      focus: 'balanced',
+      buildings: c.isCapital ? ['palace'] : [],
+      cultureStored: 0,
+      cultureTiles: 0,
+      ...c,
+    })),
+    units: s.units.map((u: any) => (u.type === 'builder' && u.charges === undefined ? { ...u, charges: 3 } : u)),
+  }),
 };
 
 export class SaveError extends Error {}
