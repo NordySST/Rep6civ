@@ -25,7 +25,10 @@ import {
   wonderOwner,
   wonderSites,
 } from './districts';
+import { cityAmenities } from './economy';
 import { modifiersFor } from './effects';
+import { religionCityYields } from './religion';
+import { tradeYieldsForCity } from './trade';
 import { isPassableLand, isWater, tileYields as rawTileYields, visibleResource } from './tiles';
 import type { Tile } from '../state/types';
 
@@ -103,11 +106,16 @@ export function cityYields(state: GameState, city: City): Yields {
   addYields(y, districtYields(state, city));
   addYields(y, wonderCityYields(city));
   addYields(y, abilityCityBonus(state, city));
+  addYields(y, tradeYieldsForCity(state, city));
+  addYields(y, religionCityYields(state, city));
   const m = modifiersFor(state, city.owner);
   addYields(y, m.cityYields);
   if (city.isCapital) addYields(y, m.capitalYields);
+  // humor (comodidades) afeta todos os rendimentos exceto comida
+  const mood = cityAmenities(state, city).yieldPct;
   for (const k of Object.keys(y) as (keyof Yields)[]) {
-    if (m.yieldPercent[k]) y[k] = Math.floor(y[k] * (1 + m.yieldPercent[k] / 100));
+    const pct = (m.yieldPercent[k] ?? 0) + (k === 'food' ? 0 : mood);
+    if (pct) y[k] = Math.max(0, Math.floor(y[k] * (1 + pct / 100)));
   }
   return y;
 }
@@ -276,6 +284,12 @@ export function cannotProduce(state: GameState, city: City, item: ProductionItem
   if (item.kind === 'unit') {
     const def = UNITS[item.id];
     if (!def || def.barbarianOnly) return 'Unidade desconhecida.';
+    if (def.greatPerson) return 'Grandes personalidades não são produzidas.';
+    if (def.faithCost && !def.cost) return 'Comprado apenas com fé.';
+    if (def.requiresCivic && !state.players[city.owner].civics.includes(def.requiresCivic)) {
+      return `Exige ${CIVIC_BY_ID[def.requiresCivic]?.name ?? def.requiresCivic}.`;
+    }
+    if (def.needsCoast && !isCoastalCity(state, city)) return 'Exige cidade costeira.';
     if (def.requiresTech && !ownerTechs(state, city).includes(def.requiresTech)) {
       return `Exige ${TECH_BY_ID[def.requiresTech]?.name ?? def.requiresTech}.`;
     }
@@ -358,10 +372,11 @@ export function purchaseCost(city: City, item: ProductionItem): number {
 
 /** Hexágono onde uma unidade nova aparece (centro ou vizinho livre). */
 function spawnTile(state: GameState, city: City, def: UnitDef): number | null {
+  const sea = def.domain === 'sea';
   const free = (i: number) =>
-    isPassableLand(state.map.tiles[i]) &&
+    (sea ? isWater(state.map.tiles[i]) : isPassableLand(state.map.tiles[i])) &&
     !state.units.some((u) => u.pos === i && (u.owner !== city.owner || UNITS[u.type].class === def.class));
-  if (free(city.pos)) return city.pos;
+  if (!sea && free(city.pos)) return city.pos;
   for (const i of tilesInRadius(state.map, city.pos, 1)) if (free(i)) return i;
   for (const i of tilesInRadius(state.map, city.pos, 2)) if (free(i)) return i;
   return null;
@@ -507,8 +522,8 @@ export function processCity(state: GameState, city: City): CityEvent[] {
 
   // comida e crescimento
   const surplus = foodSurplus(state, city, y);
-  const growthPct = modifiersFor(state, city.owner).growthPercent;
-  const mod = surplus > 0 ? housingGrowthModifier(city.population, cityHousing(state, city)) * (1 + growthPct / 100) : 1;
+  const growthPct = modifiersFor(state, city.owner).growthPercent + cityAmenities(state, city).growthPct;
+  const mod = surplus > 0 ? housingGrowthModifier(city.population, cityHousing(state, city)) * Math.max(0, 1 + growthPct / 100) : 1;
   city.foodStored += surplus * mod;
   const need = growthThreshold(city.population);
   if (city.foodStored >= need) {

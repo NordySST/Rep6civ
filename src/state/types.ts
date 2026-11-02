@@ -58,6 +58,26 @@ export interface Unit {
   acted?: boolean;
   /** Acampamento bárbaro de origem. */
   campId?: number;
+  /** Nome (grandes personalidades). */
+  name?: string;
+  /** Religião que o missionário difunde. */
+  religion?: string;
+}
+
+export interface TradeRoute {
+  id: number;
+  owner: number;
+  /** Cidade de origem e de destino (ids). */
+  from: number;
+  to: number;
+}
+
+export interface Religion {
+  id: string;
+  founder: number;
+  holyCityId: number;
+  /** Crença de seguidor (data/religion.ts). */
+  follower: string;
 }
 
 export interface Relation {
@@ -128,6 +148,9 @@ export interface City {
   rangedUsed?: boolean;
   districts: { type: string; pos: number }[];
   wonders: string[];
+  /** Religião predominante (id) e pressão religiosa acumulada por religião. */
+  religion?: string;
+  pressure: Record<string, number>;
 }
 
 export interface Player {
@@ -165,6 +188,10 @@ export interface Player {
   policies: (string | null)[];
   /** Troca gratuita de governo/políticas disponível neste turno. */
   policyChangeAvailable: boolean;
+  /** Pontos de grandes personalidades por tipo. */
+  gpPoints: Record<string, number>;
+  /** Crença de panteão escolhida. */
+  pantheon?: string;
 }
 
 export interface GameSettings {
@@ -187,6 +214,10 @@ export interface GameState {
   diplomacy: Record<string, Relation>;
   /** Propostas de acordo pendentes (IA → humano). */
   proposals: Proposal[];
+  tradeRoutes: TradeRoute[];
+  religions: Religion[];
+  /** Grandes personalidades já recrutadas no mundo, por tipo. */
+  gpRecruited: Record<string, number>;
   nextId: number;
   /** Contador para sorteios de combate/IA determinísticos. */
   rngCounter: number;

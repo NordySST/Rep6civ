@@ -118,8 +118,8 @@ export const WORLD_WONDERS: WorldWonderDef[] = [
     requiresCivic: 'games-recreation',
     placement: { hills: false },
     cityYields: { culture: 3 },
-    effects: [{ type: 'yieldPercent', yields: { culture: 15 } }],
-    description: '+15% de cultura. Terreno plano.',
+    effects: [{ type: 'yieldPercent', yields: { culture: 15 } }, { type: 'amenities', amount: 1 }],
+    description: '+15% de cultura e +1 de comodidade em todas as cidades. Terreno plano.',
   },
   {
     id: 'ulvar-forge',

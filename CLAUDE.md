@@ -27,7 +27,8 @@ Pré-requisito (uma vez): Settings → Pages → Source = **GitHub Actions**.
 src/
   data/    Definições de conteúdo (terrenos, características, recursos, maravilhas, unidades,
            edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas, promoções, distritos,
-           maravilhas mundiais, cidades-estado,
+           maravilhas mundiais, cidades-estado, religião (panteões, crenças), grandes
+           personalidades,
            civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
   state/   Tipos do estado serializável (types.ts), versão do esquema (version.ts) e
            salvar/carregar com migrações (save.ts).
@@ -41,6 +42,8 @@ src/
            cidades, cura, promoções), barbarians.ts (acampamentos e comportamento bárbaro —
            NPC determinístico, fica em rules/; a IA de civilizações rivais fica em ai/),
            districts.ts (distritos, adjacência, maravilhas mundiais, habilidades únicas),
+           economy.ts (manutenção, comodidades/humor), trade.ts (rotas comerciais),
+           religion.ts (panteão, fundação, pressão, missionários), greatPeople.ts,
            diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
            suseranos, território fechado, eliminação),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
@@ -231,6 +234,36 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   ciência em hexágonos com rio; Norvhal +1 produção em tundra/neve; Qasmira +1 ouro e +1 fé
   em deserto; Yrkaan +1 movimento para unidades que estão em planície.
 
+### Economia e sociedade (etapa 7)
+
+- Manutenção por turno: edifícios (`maintenance`, padrão 1), 1 por distrito, 1 por unidade
+  militar além de (cidades + 1). Ouro negativo dispensa a unidade militar mais fraca.
+  Cidades-estado não pagam. A barra mostra o saldo líquido.
+- Comodidades: exigidas `⌈(pop−2)/2⌉`; fontes: cada tipo de luxo melhorado no território
+  (+1 a até 4 cidades), edifícios (`amenities`), efeito `amenities`, crença de seguidor.
+  Humor: ≥+3 Eufórica (+10% rendimentos e crescimento), 0..+2 Satisfeita, −1..−2
+  Descontente (−10% rendimentos, −25% crescimento), ≤−3 Em revolta (−30%, sem crescimento).
+  Comida não é afetada pelo percentual.
+- Rotas comerciais: Comerciante (Comércio Exterior) numa cidade sua cria rota permanente até
+  outra cidade a ≤15 (sua ou de quem está em paz e conhecido). Capacidade 1 + Centros
+  Comerciais/Portos. Interna: +1 comida +1 produção; internacional: +3 ouro +1 por distrito
+  do destino (+1 se tiver Centro Comercial), destino +1 ouro; política Caravançarás +2 ouro.
+  Constrói estradas no caminho por terra. Guerra ou perda de cidade cancela a rota.
+- Religião: panteão por 25 de fé (crenças exclusivas). Grande Profeta numa cidade com Lugar
+  Sagrado funda a religião (nome + crença de seguidor exclusivos). Pressão por turno de
+  cidades seguidoras a ≤10 hexágonos (+1, cidade sagrada +3); converte com ≥20 e maior que a
+  atual. Missionário (80 de fé, 3 usos) +100 de pressão. Fundador: +1 ouro na capital por
+  cidade seguidora no mundo.
+- Grandes personalidades: +1 ponto por distrito do tipo e +1 por edifício dele; custo 60
+  (+40 a cada recrutamento do tipo no mundo). Cientista/Escritor: 50% do item atual;
+  Mercador: +200 ouro; Engenheiro: +150 produção na cidade; General: +30 XP num raio 2;
+  Profeta: funda religião.
+- Naval: Galé (Navegação à Vela) e Quadrirreme (Navegação Celeste), só em cidades costeiras.
+  Navios andam na costa (oceano com Navegação Celeste) e nas próprias cidades costeiras.
+  Unidades terrestres embarcam com Navegação à Vela (oceano com Navegação Celeste):
+  embarcar/desembarcar gasta todo o movimento, defesa embarcada 10, não atacam embarcadas;
+  só navios atacam no mar. `canEnterTerrain` centraliza as regras de domínio.
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),
@@ -248,12 +281,26 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    primeiro contato, guerra/paz, acordos, agendas dos líderes, cidades-estado.
 6. **[CONCLUÍDA] Distritos e maravilhas** — distritos especializados com bônus de adjacência, edifícios,
    maravilhas mundiais, habilidades únicas das civilizações (já descritas em `data/civs.ts`).
-7. **Economia e sociedade** — ouro/manutenção, amenidades e recursos de luxo, comércio e rotas,
+7. **[CONCLUÍDA] Economia e sociedade** — ouro/manutenção, amenidades e recursos de luxo, comércio e rotas,
    religião/fé, grandes personagens, unidades navais e exploração marítima.
 8. **Vitória e polimento** — condições de vitória (dominação, ciência, cultura, religião,
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 7 (concluída)
+- Save v7 (migração 6→7: `tradeRoutes`, `religions`, `gpRecruited`, `gpPoints`, `pressure`).
+- Dados: manutenção/comodidades dos edifícios, Comerciante, Missionário, Galé,
+  Quadrirreme, 6 grandes personalidades com nomes inventados, 8 panteões, 5 crenças de
+  seguidor, 6 religiões inventadas.
+- Regras e IA: manutenção e dispensa, comodidades e humor, rotas, religião, grandes
+  personalidades, navios e embarque; IA escolhe panteão, funda/difunde religião, cria
+  rotas, usa personalidades e explora o mar.
+- UI: 🪙 abre Economia (saldo, manutenção, luxos, rotas); ✨ abre Religião (panteão,
+  religiões); menu com Grandes personalidades; painel da cidade com comodidades, religião,
+  rotas e compra de missionário; ações de Comerciante, Missionário e personalidades.
+- Pendências: troca de luxos entre civilizações; combate religioso/teológico; vitória e
+  pontuação na etapa 8.
 
 ### Etapa 6 (concluída)
 - Save v6 (migração 5→6: `districts` e `wonders` nas cidades; `district`/`builtWonder` nos

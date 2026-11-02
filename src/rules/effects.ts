@@ -1,4 +1,5 @@
 import { GOVERNMENT_BY_ID, GOVERNMENTS, POLICY_BY_ID, type Effect, type SlotType } from '../data/governments';
+import { PANTHEON_BY_ID } from '../data/religion';
 import { WORLD_WONDER_BY_ID } from '../data/worldWonders';
 import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { GameState, Player } from '../state/types';
@@ -16,6 +17,8 @@ export interface Modifiers {
   growthPercent: number;
   extraMoves: Record<string, number>;
   cityDefense: number;
+  amenities: number;
+  tradeRouteGold: number;
 }
 
 export function emptyModifiers(): Modifiers {
@@ -29,6 +32,8 @@ export function emptyModifiers(): Modifiers {
     growthPercent: 0,
     extraMoves: {},
     cityDefense: 0,
+    amenities: 0,
+    tradeRouteGold: 0,
   };
 }
 
@@ -61,6 +66,12 @@ export function applyEffect(m: Modifiers, e: Effect): void {
     case 'cityDefense':
       m.cityDefense += e.amount;
       break;
+    case 'amenities':
+      m.amenities += e.amount;
+      break;
+    case 'tradeRouteGold':
+      m.tradeRouteGold += e.amount;
+      break;
   }
 }
 
@@ -75,6 +86,9 @@ export function playerModifiers(player: Player | undefined): Modifiers {
 export function modifiersFor(state: GameState, playerId: number): Modifiers {
   const m = playerModifiers(state.players[playerId]);
   applyCityStateBonuses(state, playerId, m);
+  // crença de panteão
+  const pan = state.players[playerId]?.pantheon;
+  if (pan) for (const e of PANTHEON_BY_ID[pan]?.effects ?? []) applyEffect(m, e);
   // maravilhas mundiais do jogador
   for (const c of state.cities) {
     if (c.owner !== playerId) continue;

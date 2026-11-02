@@ -8,7 +8,8 @@ import { directionTo, distance, neighbors, tilesInRadius } from './hex';
 import { isAtWar } from './diplomacy';
 import { modifiersFor } from './effects';
 import { createRng } from './rng';
-import { riverOnEdge } from './tiles';
+import { canEnterTerrain } from './movement';
+import { isWater, riverOnEdge } from './tiles';
 import { computeVisibility } from './visibility';
 
 /**
@@ -27,6 +28,7 @@ export const XP_MELEE_ATTACK = 5;
 export const XP_RANGED_ATTACK = 3;
 export const XP_DEFEND = 3;
 export const CAMP_GOLD = 25;
+export const EMBARKED_STRENGTH = 10;
 
 // ------------------------------------------------------------------ guerra
 
@@ -147,6 +149,8 @@ export function attackStrength(state: GameState, u: Unit, target: Target, ranged
 export function defenseStrength(state: GameState, u: Unit, attacker?: Unit): number {
   const def = UNITS[u.type];
   let s = def.strength + promoSum(u, 'defense');
+  // unidade terrestre embarcada é frágil
+  if (def.domain !== 'sea' && isWater(state.map.tiles[u.pos])) return Math.max(1, Math.min(s, EMBARKED_STRENGTH) - woundPenalty(u.hp, UNIT_MAX_HP));
   if (attacker) {
     const ac = UNITS[attacker.type].combat;
     if (ac && def.bonusVs?.[ac]) s += def.bonusVs[ac]!;
@@ -225,6 +229,9 @@ export function cannotAttack(state: GameState, u: Unit, pos: number, visCache?: 
     return null;
   }
   if (d !== 1) return 'O alvo precisa estar adjacente.';
+  const naval = def.domain === 'sea';
+  if (!naval && isWater(state.map.tiles[u.pos])) return 'Unidades embarcadas não atacam.';
+  if (!naval && isWater(state.map.tiles[pos])) return 'Só navios atacam no mar.';
   if (target.kind === 'unit' && UNITS[target.unit.type].class === 'civilian') return null;
   return null;
 }
@@ -332,7 +339,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
         delete captured.path;
       }
       events.push({ type: 'captured', by: u.owner, unitType: captured.type, pos });
-      u.pos = pos;
+      if (canEnterTerrain(state, u, pos)) u.pos = pos;
       const camp = clearCampAt(state, u);
       if (camp) events.push(camp);
       return events;
@@ -369,7 +376,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
       // avança se o hexágono ficou livre de inimigos militares
       const enemyLeft = state.units.some((x) => x.pos === pos && atWar(state, u.owner, x.owner));
       const city = state.cities.find((c) => c.pos === pos);
-      if (!enemyLeft && !city) {
+      if (!enemyLeft && !city && canEnterTerrain(state, u, pos)) {
         // civis inimigos restantes são capturados
         for (const x of state.units.filter((x) => x.pos === pos && x.owner === t.owner)) {
           if (state.players[u.owner].isBarbarian) removeUnit(state, x);

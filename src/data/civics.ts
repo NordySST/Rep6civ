@@ -31,7 +31,7 @@ export const CIVICS: CivicDef[] = [
     name: 'Comércio Exterior',
     cost: 40,
     prereqs: ['code-of-laws'],
-    description: 'Políticas de comércio.',
+    description: 'Libera o Comerciante e políticas de comércio.',
     boost: { description: 'Tenha 2 cidades.', condition: { type: 'cities', count: 2 } },
   },
   {

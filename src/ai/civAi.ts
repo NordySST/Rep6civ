@@ -17,6 +17,10 @@ import { scoreStart } from '../rules/mapgen';
 import { canOccupy, findPath } from '../rules/movement';
 import { availableItems, treeCost } from '../rules/research';
 import { isPassableLand } from '../rules/tiles';
+import { canEnterTerrain } from '../rules/movement';
+import { availableFollowerBeliefs, availablePantheons, availableReligionNames, cannotFoundReligion, religionOf } from '../rules/religion';
+import { routesOf, tradeCapacity, tradeDestinations } from '../rules/trade';
+import { PANTHEON_COST } from '../data/religion';
 import type { City, GameState, ProductionItem, Unit } from '../state/types';
 import { act } from './common';
 
@@ -113,7 +117,13 @@ function bestDistrict(state: GameState, city: City): ProductionItem | null {
   let bestScore = 0;
   for (const d of DISTRICT_LIST) {
     for (const tile of districtSites(state, city, d.id)) {
-      const sc = adjacencyBonus(state, tile, d.id) + (DISTRICT_PREF[agenda]?.includes(d.id) ? 2 : 0) + (d.id === 'campus' ? 1 : 0) - tile * 1e-6;
+      const wantsFaith = d.id === 'holy-site' && !religionOf(state, city.owner) && availableReligionNames(state).length > 0;
+      const sc =
+        adjacencyBonus(state, tile, d.id) +
+        (DISTRICT_PREF[agenda]?.includes(d.id) ? 2 : 0) +
+        (d.id === 'campus' ? 1 : 0) +
+        (wantsFaith ? 1.5 : 0) -
+        tile * 1e-6;
       if (sc > bestScore) {
         bestScore = sc;
         best = { kind: 'district', id: d.id, tile };
@@ -160,6 +170,15 @@ export function chooseProduction(state: GameState, city: City): ProductionItem |
   const builders = count(state, id, (u) => u.type === 'builder');
   if (builders < Math.ceil(myCities / 2) && can({ kind: 'unit', id: 'builder' })) return { kind: 'unit', id: 'builder' };
   if (count(state, id, (u) => u.type === 'scout') === 0 && state.turn < 30 && can({ kind: 'unit', id: 'scout' })) return { kind: 'unit', id: 'scout' };
+  // rotas comerciais livres
+  const traders = count(state, id, (u) => u.type === 'trader');
+  if (routesOf(state, id).length + traders < tradeCapacity(state, id) && can({ kind: 'unit', id: 'trader' })) {
+    return { kind: 'unit', id: 'trader' };
+  }
+  // um navio explorador por civilização
+  if (count(state, id, (u) => UNITS[u.type].domain === 'sea') === 0 && can({ kind: 'unit', id: 'galley' })) {
+    return { kind: 'unit', id: 'galley' };
+  }
   // distritos: o de maior adjacência (com preferência da agenda)
   const district = bestDistrict(state, city);
   if (district) return district;
@@ -321,7 +340,7 @@ function exploreTarget(state: GameState, id: number, u: Unit): number | null {
   let best: number | null = null;
   let bestD = Infinity;
   for (const i of tilesInRadius(state.map, u.pos, 10)) {
-    if (ex[i] || !isPassableLand(state.map.tiles[i])) continue;
+    if (ex[i] || !canEnterTerrain(state, u, i)) continue;
     // fronteira: inexplorado vizinho de explorado
     if (!neighbors(state.map, i).some((n) => n >= 0 && ex[n])) continue;
     const d = distance(state.map, u.pos, i);
@@ -380,13 +399,100 @@ export function aiUnits(state: GameState, id: number, events: GameEvent[]): void
     const def = UNITS[u.type];
     if (def.canFoundCity) runSettler(state, id, u, events);
     else if (def.charges) runBuilder(state, id, u, events);
+    else if (def.trader) runTrader(state, id, u, events);
+    else if (def.spreads) runMissionary(state, id, u, events);
+    else if (def.greatPerson) runGreatPerson(state, id, u, events);
+    else if (def.domain === 'sea') runNaval(state, id, u, events);
     else if (def.class === 'military') runMilitary(state, id, u, events);
+  }
+}
+
+function nearestOwnCity(state: GameState, id: number, u: Unit, f: (c: City) => boolean = () => true): City | undefined {
+  const cs = state.cities.filter((c) => c.owner === id && f(c));
+  if (!cs.length) return undefined;
+  return cs.reduce((a, b) => (distance(state.map, u.pos, b.pos) < distance(state.map, u.pos, a.pos) ? b : a));
+}
+
+function runTrader(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
+  const dests = tradeDestinations(state, u);
+  if (dests.length) {
+    const origin = state.cities.find((c) => c.pos === u.pos)!;
+    const score = (c: City) => (c.owner !== id ? 10 + c.districts.length : 3) - distance(state.map, origin.pos, c.pos) * 0.1;
+    const best = dests.reduce((a, b) => (score(b) > score(a) ? b : a));
+    if (act(state, id, { type: 'establishRoute', unitId: u.id, cityId: best.id }, events)) return;
+  }
+  const home = nearestOwnCity(state, id, u, (c) => c.pos !== u.pos);
+  if (home) moveToward(state, id, u, home.pos, events);
+}
+
+function runMissionary(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
+  const targets = state.cities.filter((c) => c.religion !== u.religion && distance(state.map, u.pos, c.pos) <= 12);
+  if (!targets.length) return;
+  const t = targets.reduce((a, b) => (distance(state.map, u.pos, b.pos) < distance(state.map, u.pos, a.pos) ? b : a));
+  if (distance(state.map, u.pos, t.pos) <= 1) {
+    act(state, id, { type: 'spreadReligion', unitId: u.id, cityId: t.id }, events);
+    return;
+  }
+  moveToward(state, id, u, t.pos, events, true);
+  const again = state.units.find((x) => x.id === u.id);
+  if (again && again.movesLeft > 0 && distance(state.map, again.pos, t.pos) <= 1) {
+    act(state, id, { type: 'spreadReligion', unitId: u.id, cityId: t.id }, events);
+  }
+}
+
+function runGreatPerson(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
+  const t = UNITS[u.type].greatPerson;
+  if (t === 'prophet') {
+    if (!cannotFoundReligion(state, u)) {
+      const name = availableReligionNames(state)[0];
+      const follower = availableFollowerBeliefs(state)[0];
+      if (name && follower) act(state, id, { type: 'foundReligion', unitId: u.id, religion: name, follower }, events);
+      return;
+    }
+    const holy = nearestOwnCity(state, id, u, (c) => c.districts.some((d) => d.type === 'holy-site'));
+    if (holy && holy.pos !== u.pos) moveToward(state, id, u, holy.pos, events);
+    return;
+  }
+  if (t === 'engineer') {
+    const here = state.cities.find((c) => c.pos === u.pos && c.owner === id && c.queue.length);
+    if (here) {
+      act(state, id, { type: 'activateGreatPerson', unitId: u.id }, events);
+      return;
+    }
+    const cap = nearestOwnCity(state, id, u, (c) => c.queue.length > 0);
+    if (cap) moveToward(state, id, u, cap.pos, events);
+    return;
+  }
+  act(state, id, { type: 'activateGreatPerson', unitId: u.id }, events);
+}
+
+function runNaval(state: GameState, id: number, u: Unit, events: GameEvent[]): void {
+  if (tryAttackBest(state, id, u, events)) return;
+  const t = exploreTarget(state, id, u);
+  if (t !== null) moveToward(state, id, u, t, events);
+  else if (!u.fortified) act(state, id, { type: 'fortify', unitId: u.id }, events);
+}
+
+/** Fé: panteão e missionários. */
+export function aiFaith(state: GameState, id: number, events: GameEvent[]): void {
+  const p = state.players[id];
+  if (p.isCityState) return;
+  if (!p.pantheon && p.faith >= PANTHEON_COST) {
+    const opts = availablePantheons(state);
+    if (opts.length) act(state, id, { type: 'choosePantheon', belief: opts[0] }, events);
+  }
+  const rel = religionOf(state, id);
+  const missionaries = count(state, id, (u) => u.type === 'missionary');
+  if (rel && missionaries < 2 && p.faith >= (UNITS.missionary.faithCost ?? 80) + 20) {
+    const city = state.cities.find((c) => c.owner === id && c.religion === rel.id);
+    if (city) act(state, id, { type: 'buyWithFaith', cityId: city.id, unit: 'missionary' }, events);
   }
 }
 
 /** Turno completo de uma IA (civilização ou cidade-estado). */
 export function runAiPlayer(state: GameState, id: number, events: GameEvent[]): void {
   aiResearch(state, id, events);
+  aiFaith(state, id, events);
   aiUnits(state, id, events);
   aiCities(state, id, events);
 }

@@ -125,6 +125,15 @@ export const MIGRATIONS: MigrationTable = {
     ...s,
     cities: s.cities.map((c: any) => ({ districts: [], wonders: [], ...c })),
   }),
+  // v6 → v7 (etapa 7): rotas, religião, grandes personalidades.
+  6: (s) => ({
+    ...s,
+    players: s.players.map((p: any) => ({ gpPoints: {}, ...p })),
+    cities: s.cities.map((c: any) => ({ pressure: {}, ...c })),
+    tradeRoutes: s.tradeRoutes ?? [],
+    religions: s.religions ?? [],
+    gpRecruited: s.gpRecruited ?? {},
+  }),
 };
 
 export class SaveError extends Error {}
