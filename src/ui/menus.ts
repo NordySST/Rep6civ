@@ -1,3 +1,4 @@
+import { CITY_STATES } from '../data/cityStates';
 import { CIVS } from '../data/civs';
 import { MAP_SIZES, type MapSizeId } from '../data/mapSizes';
 import { randomSeedString } from '../rules/rng';
@@ -37,6 +38,8 @@ export interface NewGameChoice {
   seed: string;
   mapSize: MapSizeId;
   civId: string;
+  rivals?: number;
+  cityStates?: number;
 }
 
 export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Partial<NewGameChoice>): HTMLElement {
@@ -51,6 +54,26 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
     spellcheck: 'false',
   }) as HTMLInputElement;
 
+  let rivals: number | undefined = defaults?.rivals;
+  let cityStates: number | undefined = defaults?.cityStates;
+  const countsRow = h('div', { class: 'counts' });
+  const counter = (label: string, get: () => number, set: (n: number) => void, max: number) =>
+    h(
+      'div',
+      { class: 'counter' },
+      h('span', {}, label),
+      h('button', { class: 'btn icon', 'aria-label': `${label} −`, onclick: () => (set(Math.max(0, get() - 1)), renderCounts()) }, '−'),
+      h('strong', {}, String(get())),
+      h('button', { class: 'btn icon', 'aria-label': `${label} +`, onclick: () => (set(Math.min(max, get() + 1)), renderCounts()) }, '+'),
+    );
+  const renderCounts = () => {
+    clear(countsRow);
+    countsRow.append(
+      counter(T.rivals, () => rivals ?? MAP_SIZES[size].rivals, (n) => (rivals = n), CIVS.length - 1),
+      counter(T.cityStatesLabel, () => cityStates ?? MAP_SIZES[size].cityStates, (n) => (cityStates = n), CITY_STATES.length),
+    );
+  };
+
   const sizeRow = h('div', { class: 'seg' });
   const renderSizes = () => {
     clear(sizeRow);
@@ -63,7 +86,11 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
             'aria-pressed': String(s.id === size),
             onclick: () => {
               size = s.id;
+              rivals = undefined;
+              cityStates = undefined;
               renderSizes();
+  renderCounts();
+              renderCounts();
             },
           },
           h('span', {}, s.name),
@@ -109,6 +136,8 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
     { class: 'form' },
     h('label', { class: 'field-label' }, T.mapSize),
     sizeRow,
+    h('label', { class: 'field-label' }, T.opponents),
+    countsRow,
     h('label', { class: 'field-label' }, T.seed),
     h(
       'div',
@@ -122,7 +151,14 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
       'button',
       {
         class: 'btn primary wide',
-        onclick: () => onStart({ seed: seedInput.value.trim() || randomSeedString(), mapSize: size, civId }),
+        onclick: () =>
+          onStart({
+            seed: seedInput.value.trim() || randomSeedString(),
+            mapSize: size,
+            civId,
+            rivals: rivals ?? MAP_SIZES[size].rivals,
+            cityStates: cityStates ?? MAP_SIZES[size].cityStates,
+          }),
       },
       T.start,
     ),

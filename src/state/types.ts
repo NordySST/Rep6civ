@@ -56,6 +56,31 @@ export interface Unit {
   campId?: number;
 }
 
+export interface Relation {
+  met: boolean;
+  war: boolean;
+  /** Turno em que a guerra/paz atual começou. */
+  since: number;
+  openBordersUntil?: number;
+  friendshipUntil?: number;
+  /** Ressentimentos: chave = quem guarda o ressentimento, valor = intensidade (decai). */
+  grievances: Record<number, number>;
+}
+
+export type DealItem =
+  | { type: 'peace' }
+  | { type: 'openBorders' }
+  | { type: 'friendship' }
+  | { type: 'gold'; from: number; amount: number };
+
+export interface Proposal {
+  id: number;
+  from: number;
+  to: number;
+  items: DealItem[];
+  turn: number;
+}
+
 export interface BarbarianCamp {
   id: number;
   pos: number;
@@ -102,6 +127,13 @@ export interface Player {
   civId: string;
   isHuman: boolean;
   isBarbarian?: boolean;
+  isCityState?: boolean;
+  /** Sem cidades nem unidades: fora do jogo. */
+  eliminated?: boolean;
+  /** Emissários disponíveis para enviar a cidades-estado. */
+  envoyTokens: number;
+  /** (Cidades-estado) emissários recebidos por jogador. */
+  envoys?: Record<number, number>;
   /** 1 = hexágono já explorado. Mesmo tamanho de map.tiles. */
   explored: number[];
   /** Quantas cidades já foram fundadas (para escolher o próximo nome). */
@@ -143,6 +175,10 @@ export interface GameState {
   units: Unit[];
   cities: City[];
   camps: BarbarianCamp[];
+  /** Relações diplomáticas por par: chave "a-b" com a < b (ver rules/diplomacy.ts). */
+  diplomacy: Record<string, Relation>;
+  /** Propostas de acordo pendentes (IA → humano). */
+  proposals: Proposal[];
   nextId: number;
   /** Contador para sorteios de combate/IA determinísticos. */
   rngCounter: number;

@@ -12,19 +12,29 @@ function game(seed = 'teste') {
   return newGame({ seed, mapSize: 'small', civId: 'tamaru' });
 }
 
+function soloGame(seed = 'teste') {
+  return newGame({ seed, mapSize: 'small', civId: 'tamaru', rivals: 0, cityStates: 0 });
+}
+
 
 describe('novo jogo', () => {
   it('começa com colono e guerreiro do jogador em terra', () => {
     const s = game();
     expect(s.turn).toBe(1);
-    const types = s.units.map((u) => u.type).sort();
-    expect(types).toEqual(['settler', 'warrior']);
+    const mine = s.units.filter((u) => u.owner === 0);
+    expect(mine.map((u) => u.type).sort()).toEqual(['settler', 'warrior']);
     for (const u of s.units) expect(isPassableLand(s.map.tiles[u.pos])).toBe(true);
     expect(s.players[0].civId).toBe('tamaru');
+    // rivais (2) e cidades-estado (2) no mapa pequeno, bárbaros no índice 1
+    expect(s.players[1].isBarbarian).toBe(true);
+    expect(s.players.filter((p) => !p.isBarbarian && !p.isCityState && !p.isHuman)).toHaveLength(2);
+    expect(s.players.filter((p) => p.isCityState)).toHaveLength(2);
+    expect(s.cities.filter((c) => s.players[c.owner].isCityState)).toHaveLength(2);
+    expect(new Set(s.players.map((p) => p.civId)).size).toBe(s.players.length);
   });
 
   it('revela os arredores iniciais e mantém o resto inexplorado', () => {
-    const s = game();
+    const s = soloGame();
     const explored = s.players[0].explored.filter((x) => x === 1).length;
     expect(explored).toBeGreaterThan(5);
     expect(explored).toBeLessThan(s.map.tiles.length / 4);
@@ -38,7 +48,7 @@ describe('novo jogo', () => {
 
 describe('fundar cidade', () => {
   it('colono funda cidade, é consumido e cria território', () => {
-    const s = game();
+    const s = soloGame();
     const settler = s.units.find((u) => u.type === 'settler')!;
     const { state, events } = applyAction(s, { type: 'foundCity', unitId: settler.id });
     expect(events[0].type).toBe('cityFounded');
@@ -52,7 +62,7 @@ describe('fundar cidade', () => {
   });
 
   it('guerreiro não funda cidades', () => {
-    const s = game();
+    const s = soloGame();
     const w = s.units.find((u) => u.type === 'warrior')!;
     const { state, events } = applyAction(s, { type: 'foundCity', unitId: w.id });
     expect(events[0].type).toBe('error');

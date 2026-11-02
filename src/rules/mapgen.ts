@@ -379,12 +379,16 @@ export function findStartPositions(map: GameMap, count: number, seed: string, mi
     if (s > -Infinity) scored.push({ i, s: s + rng.next() * 2 });
   }
   scored.sort((a, b) => b.s - a.s);
-  const out: number[] = [];
-  for (const c of scored) {
-    if (out.length >= count) break;
-    if (out.some((o) => distance(map, o, c.i) < minDist)) continue;
-    if (landmassSize(map, c.i, 30) < 30) continue;
-    out.push(c.i);
+  let out: number[] = [];
+  // relaxa a distância mínima até caberem todos
+  for (let md = minDist; md >= 4 && out.length < count; md--) {
+    out = [];
+    for (const c of scored) {
+      if (out.length >= count) break;
+      if (out.some((o) => distance(map, o, c.i) < md)) continue;
+      if (landmassSize(map, c.i, 30) < 30) continue;
+      out.push(c.i);
+    }
   }
   // fallback: qualquer terra transitável
   if (out.length < count) {

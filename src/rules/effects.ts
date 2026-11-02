@@ -1,6 +1,7 @@
 import { GOVERNMENT_BY_ID, GOVERNMENTS, POLICY_BY_ID, type Effect, type SlotType } from '../data/governments';
 import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { GameState, Player } from '../state/types';
+import { applyCityStateBonuses } from './diplomacy';
 
 /** Modificadores agregados do governo + políticas ativas de um jogador. */
 export interface Modifiers {
@@ -66,7 +67,9 @@ export function playerModifiers(player: Player | undefined): Modifiers {
 }
 
 export function modifiersFor(state: GameState, playerId: number): Modifiers {
-  return playerModifiers(state.players[playerId]);
+  const m = playerModifiers(state.players[playerId]);
+  applyCityStateBonuses(state, playerId, m);
+  return m;
 }
 
 // ------------------------------------------------------------------ governo e espaços

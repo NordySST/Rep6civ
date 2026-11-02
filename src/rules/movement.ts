@@ -2,6 +2,7 @@ import { ROAD_MOVE_COST } from '../data/improvements';
 import { UNITS } from '../data/units';
 import type { GameState, Unit } from '../state/types';
 import { enemyZoc, promotionMoves } from './combat';
+import { canEnterTerritory } from './diplomacy';
 import { modifiersFor } from './effects';
 import { directionTo, distance, neighbor } from './hex';
 import { enterCost, isPassableLand, riverOnEdge } from './tiles';
@@ -47,6 +48,7 @@ export const RIVER_CROSSING_COST = 99;
 
 export function canOccupy(state: GameState, unit: Unit, to: number): boolean {
   if (!isPassableLand(state.map.tiles[to])) return false;
+  if (!canEnterTerritory(state, unit.owner, state.map.tiles[to].owner)) return false;
   const cls = UNITS[unit.type].class;
   for (const o of state.units) {
     if (o.pos !== to || o.id === unit.id) continue;
@@ -183,6 +185,7 @@ export function findPath(state: GameState, unit: Unit, target: number, opts: Pat
       if (!known(nb)) cost = 1;
       else {
         if (!isPassableLand(map.tiles[nb])) continue;
+        if (!canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
         // unidades bloqueiam apenas como destino final ou se forem de outro dono
         if (nb !== target) {
           const enemy = state.units.some((o) => o.pos === nb && o.owner !== unit.owner);
@@ -223,6 +226,7 @@ export function reachableThisTurn(state: GameState, unit: Unit): Set<number> {
       if (state.units.some((o) => o.pos === nb && o.owner !== unit.owner)) continue;
       if (state.cities.some((c) => c.pos === nb && c.owner !== unit.owner)) continue;
       if (!isPassableLand(map.tiles[nb])) continue;
+      if (!canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
       const rest = Math.max(0, left - stepCost(state, cur, nb, zoc));
       if (rest > (best.get(nb) ?? -1)) {
         best.set(nb, rest);
