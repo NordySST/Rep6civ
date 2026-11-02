@@ -49,6 +49,20 @@ import {
   workableTiles,
 } from '../rules/cities';
 import { canFoundCity } from '../rules/city';
+import { cityAmenities, improvedLuxuries, maintenanceOf } from '../rules/economy';
+import { gpCost, gpPerTurn } from '../rules/greatPeople';
+import {
+  availableFollowerBeliefs,
+  availablePantheons,
+  availableReligionNames,
+  canBuyMissionary,
+  cannotFoundReligion,
+  religionOf,
+} from '../rules/religion';
+import { routesOf, routeYields, tradeCapacity, tradeDestinations } from '../rules/trade';
+import { distance } from '../rules/hex';
+import { FOLLOWER_BY_ID, PANTHEON_BY_ID, PANTHEON_COST, RELIGION_NAME_BY_ID } from '../data/religion';
+import { GREAT_PERSON_TYPES } from '../data/greatPeople';
 import { adjacencyBonus, districtLimit, districtSites, wonderSites } from '../rules/districts';
 import { DISTRICTS, type DistrictId } from '../data/districts';
 import { WORLD_WONDER_BY_ID } from '../data/worldWonders';
@@ -83,6 +97,7 @@ import { attachInput } from './input';
 import { closeModal, newGameForm, openModal, slotList } from './menus';
 import { T } from './strings';
 
+const religionLabel = (id: string) => `${RELIGION_NAME_BY_ID[id]?.icon ?? ''} ${RELIGION_NAME_BY_ID[id]?.name ?? id}`;
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 /**
@@ -293,6 +308,24 @@ export class App {
         return T.eliminatedMsg(playerName(s, ev.player));
       case 'envoyGained':
         return ev.player === s.currentPlayer ? T.envoyGained : null;
+      case 'disbanded':
+        return ev.player === s.currentPlayer ? T.disbandedMsg(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
+      case 'routeCreated':
+        return ev.owner === s.currentPlayer ? T.routeCreated(cname(ev.from), cname(ev.to)) : null;
+      case 'routeLost':
+        return ev.owner === s.currentPlayer ? T.routeLost(cname(ev.from), cname(ev.to)) : null;
+      case 'pantheon':
+        return ev.player === s.currentPlayer ? T.pantheonMsg(PANTHEON_BY_ID[ev.belief]?.name ?? ev.belief) : null;
+      case 'religionFounded':
+        return T.religionFoundedMsg(playerName(s, ev.player), religionLabel(ev.religion));
+      case 'cityConverted': {
+        const c = s.cities.find((x) => x.id === ev.cityId);
+        return c && c.owner === s.currentPlayer ? T.convertedMsg(c.name, religionLabel(ev.religion)) : null;
+      }
+      case 'greatPerson': {
+        const def = GREAT_PERSON_TYPES[ev.gpType];
+        return ev.player === s.currentPlayer ? T.gpRecruited(ev.name, def.name) : hasMet(s, s.currentPlayer, ev.player) ? T.gpOther(playerName(s, ev.player), ev.name) : null;
+      }
       case 'techDone':
         return ev.playerId === s.currentPlayer ? T.techDone(TECH_BY_ID[ev.id]?.name ?? ev.id) : null;
       case 'civicDone':
@@ -825,6 +858,32 @@ export class App {
     if (u.path?.length) {
       actions.push(h('button', { class: 'btn', onclick: () => this.dispatch({ type: 'cancelPath', unitId: u.id }) && this.renderHud() }, '✋ ' + T.cancelMove));
     }
+    const extraInfo: HTMLElement[] = [];
+    if (def.trader) {
+      const dests = tradeDestinations(s, u);
+      actions.unshift(
+        h('button', { class: 'btn primary', disabled: !dests.length, onclick: () => this.showTradeRoutes(u) }, '🐪 ' + T.createRoute),
+      );
+      if (!s.cities.some((c) => c.pos === u.pos && c.owner === u.owner)) extraInfo.push(h('small', { class: 'muted' }, T.traderHint));
+    }
+    if (def.spreads && u.religion) {
+      for (const c of s.cities.filter((c) => distance(s.map, u.pos, c.pos) <= 1 && c.religion !== u.religion)) {
+        actions.unshift(
+          h('button', { class: 'btn primary', onclick: () => this.unitAction({ type: 'spreadReligion', unitId: u.id, cityId: c.id }) }, `☦ ${T.spreadIn(c.name)}`),
+        );
+      }
+      extraInfo.push(h('small', {}, `${religionLabel(u.religion)} · ${T.uses}: ${u.charges ?? 0}`));
+    }
+    if (def.greatPerson) {
+      if (u.name) extraInfo.push(h('small', { class: 'wonder' }, u.name));
+      if (def.greatPerson === 'prophet') {
+        const why = cannotFoundReligion(s, u);
+        actions.unshift(h('button', { class: 'btn primary', disabled: !!why, title: why ?? '', onclick: () => this.showFoundReligion(u) }, '🕯 ' + T.foundReligion));
+        if (why) extraInfo.push(h('small', { class: 'muted' }, why));
+      } else {
+        actions.unshift(h('button', { class: 'btn primary', onclick: () => this.unitAction({ type: 'activateGreatPerson', unitId: u.id }) }, '✦ ' + T.activate));
+      }
+    }
     if (def.charges) {
       for (const id of availableImprovements(s, u)) {
         const imp = IMPROVEMENTS[id];
@@ -865,6 +924,7 @@ export class App {
       h('strong', {}, `${def.glyph} ${def.name}`),
       h('small', {}, `${T.moves}: ${fmt(u.movesLeft)}/${def.moves}${u.fortified ? ' · Fortificado' : ''}${def.charges ? ` · ${T.charges}: ${u.charges ?? 0}` : ''}`),
     ];
+    info.push(...extraInfo);
     if (def.class === 'military') {
       const ranged = def.rangedStrength ? ` · 🏹 ${def.rangedStrength} (${T.range} ${unitRange(u)})` : '';
       const promos = u.promotions.length ? ` · ${u.promotions.map((p) => PROMOTION_BY_ID[p]?.name).join(', ')}` : '';
@@ -912,10 +972,10 @@ export class App {
     return h(
       'div',
       { class: 'resbar' },
-      item('🪙', String(Math.floor(p.gold)), inc.gold, 'Ouro'),
+      item('🪙', String(Math.floor(p.gold)), inc.gold - maintenanceOf(s, s.currentPlayer).total, 'Ouro', () => this.showEconomy()),
       item('🔬', cur('tech'), inc.science, T.techTree, () => this.showTree('tech')),
       item('🎭', cur('civic'), inc.culture, T.civicTree, () => this.showTree('civic')),
-      item('✨', String(Math.floor(p.faith)), inc.faith, 'Fé'),
+      item('✨', String(Math.floor(p.faith)), inc.faith, 'Fé', () => this.showReligion()),
     );
   }
 
@@ -942,6 +1002,18 @@ export class App {
           : `⚒ ${T.noProduction}`,
       ),
       h('small', { class: 'muted' }, `🎭 ${T.border}: ${Math.floor(c.cultureStored)}/${borderThreshold(c.cultureTiles)} · ${T.cityHint}`),
+      (() => {
+        const a = cityAmenities(s, c);
+        return h('small', { class: a.balance < 0 ? 'danger-text' : a.balance >= 3 ? 'good' : '' }, T.amenityLine(a.provided, a.needed, a.label));
+      })(),
+      h(
+        'small',
+        {},
+        `${c.religion ? religionLabel(c.religion) : T.noReligion}${(() => {
+          const n = s.tradeRoutes.filter((r) => r.from === c.id || r.to === c.id).length;
+          return n ? ` · 🐪 ${T.routesCount(n)}` : '';
+        })()}`,
+      ),
       h(
         'small',
         {},
@@ -957,6 +1029,20 @@ export class App {
     const actions: HTMLElement[] = [
       ...(this.pendingAttack !== undefined ? [h('button', { class: 'btn danger', onclick: () => this.confirmAttack() }, '🏹 ' + T.attack)] : []),
       h('button', { class: `btn ${item ? '' : 'primary'}`, onclick: () => this.showProduction() }, '⚒ ' + T.production),
+      ...(c.religion && religionOf(s, c.owner)
+        ? [
+            h(
+              'button',
+              {
+                class: 'btn',
+                disabled: !!canBuyMissionary(s, c),
+                title: canBuyMissionary(s, c) ?? '',
+                onclick: () => this.dispatch({ type: 'buyWithFaith', cityId: c.id, unit: 'missionary' }) && this.renderHud(),
+              },
+              `☦ ${T.buyMissionary(UNITS.missionary.faithCost ?? 80)}`,
+            ),
+          ]
+        : []),
       h(
         'button',
         { class: 'btn', onclick: () => this.cycleFocus(c) },
@@ -1300,6 +1386,195 @@ export class App {
     );
   }
 
+  private showTradeRoutes(u: Unit): void {
+    const s = this.state!;
+    const host = this.modalHost();
+    const origin = s.cities.find((c) => c.pos === u.pos)!;
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, T.routeCapacity(routesOf(s, u.owner).length, tradeCapacity(s, u.owner))),
+      ...tradeDestinations(s, u).map((c) => {
+        const ry = routeYields(s, { id: 0, owner: u.owner, from: origin.id, to: c.id });
+        const parts = (Object.keys(ry.origin) as (keyof typeof ry.origin)[])
+          .filter((k) => ry.origin[k])
+          .map((k) => `${YIELD_LABELS[k].icon}+${ry.origin[k]}`)
+          .join(' ');
+        return h(
+          'button',
+          {
+            class: 'tree-card available',
+            onclick: () => {
+              if (this.dispatch({ type: 'establishRoute', unitId: u.id, cityId: c.id })) {
+                closeModal(host);
+                if (!this.selectNextUnit()) this.renderHud();
+              }
+            },
+          },
+          h('strong', {}, `${c.name}${c.owner !== u.owner ? ` (${playerName(s, c.owner)})` : ''}`),
+          h('small', {}, `${parts} · ${distance(s.map, origin.pos, c.pos)} ${T.hexes}`),
+        );
+      }),
+    );
+    openModal(host, T.createRoute, body);
+  }
+
+  private showFoundReligion(u: Unit): void {
+    const s = this.state!;
+    const host = this.modalHost();
+    let name = availableReligionNames(s)[0];
+    let follower = availableFollowerBeliefs(s)[0];
+    const nameSel = h(
+      'select',
+      { class: 'policy-select', onchange: (e: Event) => (name = (e.target as HTMLSelectElement).value) },
+      ...availableReligionNames(s).map((id) => h('option', { value: id }, religionLabel(id))),
+    );
+    const belSel = h(
+      'select',
+      { class: 'policy-select', onchange: (e: Event) => (follower = (e.target as HTMLSelectElement).value) },
+      ...availableFollowerBeliefs(s).map((id) => h('option', { value: id }, `${FOLLOWER_BY_ID[id].name} — ${FOLLOWER_BY_ID[id].description}`)),
+    );
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, T.foundReligionHint),
+      h('label', { class: 'field-label' }, T.religionName),
+      nameSel,
+      h('label', { class: 'field-label' }, T.followerBelief),
+      belSel,
+      h(
+        'button',
+        {
+          class: 'btn primary wide',
+          onclick: () => {
+            if (this.dispatch({ type: 'foundReligion', unitId: u.id, religion: name, follower })) {
+              closeModal(host);
+              if (!this.selectNextUnit()) this.renderHud();
+            }
+          },
+        },
+        '🕯 ' + T.foundReligion,
+      ),
+    );
+    openModal(host, T.foundReligion, body);
+  }
+
+  private showReligion(): void {
+    const s = this.state;
+    if (!s) return;
+    const p = s.players[s.currentPlayer];
+    const host = this.modalHost();
+    const reopen = () => {
+      this.renderHud();
+      this.showReligion();
+    };
+    const pantheon = p.pantheon
+      ? h('div', { class: 'dip-card' }, h('strong', {}, `${T.pantheon}: ${PANTHEON_BY_ID[p.pantheon]?.name}`), h('small', {}, PANTHEON_BY_ID[p.pantheon]?.description ?? ''))
+      : h(
+          'div',
+          { class: 'form' },
+          h('small', { class: p.faith >= PANTHEON_COST ? 'hint' : 'muted' }, T.pantheonHint(PANTHEON_COST, Math.floor(p.faith))),
+          h(
+            'div',
+            { class: 'tree-grid' },
+            ...availablePantheons(s).map((id) =>
+              h(
+                'button',
+                {
+                  class: 'tree-card available',
+                  disabled: p.faith < PANTHEON_COST,
+                  onclick: () => this.dispatch({ type: 'choosePantheon', belief: id }) && reopen(),
+                },
+                h('strong', {}, PANTHEON_BY_ID[id].name),
+                h('small', {}, PANTHEON_BY_ID[id].description),
+              ),
+            ),
+          ),
+        );
+    const religions = s.religions.map((r) => {
+      const followers = s.cities.filter((c) => c.religion === r.id).length;
+      return h(
+        'div',
+        { class: 'dip-card' },
+        h('strong', {}, religionLabel(r.id)),
+        h('small', {}, `${T.founder}: ${playerName(s, r.founder)} · ${T.followers}: ${followers}`),
+        h('small', { class: 'muted' }, `${FOLLOWER_BY_ID[r.follower]?.name}: ${FOLLOWER_BY_ID[r.follower]?.description}`),
+      );
+    });
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, `✨ ${Math.floor(p.faith)} · ${T.religionHint}`),
+      h('label', { class: 'field-label' }, T.pantheon),
+      pantheon,
+      h('label', { class: 'field-label' }, T.religionsLabel),
+      religions.length ? null : h('p', { class: 'muted' }, T.noReligionsYet),
+      ...religions,
+    );
+    openModal(host, T.religionTitle, body);
+  }
+
+  private showGreatPeople(): void {
+    const s = this.state;
+    if (!s) return;
+    const p = s.players[s.currentPlayer];
+    const per = gpPerTurn(s, s.currentPlayer);
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, T.gpHint),
+      ...Object.values(GREAT_PERSON_TYPES).map((d) => {
+        const pts = Math.floor(p.gpPoints[d.id] ?? 0);
+        const cost = gpCost(s, d.id);
+        return h(
+          'div',
+          { class: 'dip-card' },
+          h('strong', {}, `${d.icon} ${d.name}`),
+          h('small', {}, `${pts}/${cost} · +${per[d.id]} ${T.perTurn} · ${T.from} ${DISTRICTS[d.district as DistrictId]?.name}`),
+          h('span', { class: 'bar' }, h('span', { style: `width:${Math.min(100, (pts / cost) * 100)}%` })),
+        );
+      }),
+    );
+    openModal(this.modalHost(), T.greatPeople, body);
+  }
+
+  private showEconomy(): void {
+    const s = this.state;
+    if (!s) return;
+    const me = s.currentPlayer;
+    const inc = playerIncome(s, me);
+    const m = maintenanceOf(s, me);
+    const lux = improvedLuxuries(s, me);
+    const routes = routesOf(s, me);
+    const cityName = (id: number) => s.cities.find((c) => c.id === id)?.name ?? '?';
+    const body = h(
+      'div',
+      { class: 'form' },
+      h(
+        'div',
+        { class: 'dip-card' },
+        h('strong', {}, T.goldBalance(inc.gold - m.total)),
+        h('small', {}, `${T.income}: +${inc.gold}`),
+        h('small', {}, `${T.maintenance}: −${m.total} (${T.maintBuildings} ${m.buildings} · ${T.districtsLabel} ${m.districts} · ${T.units} ${m.units})`),
+        h('small', { class: 'muted' }, T.maintHint),
+      ),
+      h(
+        'div',
+        { class: 'dip-card' },
+        h('strong', {}, `${T.luxuries}: ${lux.length}`),
+        h('small', {}, lux.length ? lux.map((id) => `${RESOURCE_BY_ID[id].icon} ${RESOURCE_BY_ID[id].name}`).join(' · ') : T.noLuxuries),
+        h('small', { class: 'muted' }, T.luxuryHint),
+      ),
+      h(
+        'div',
+        { class: 'dip-card' },
+        h('strong', {}, T.routeCapacity(routes.length, tradeCapacity(s, me))),
+        ...routes.map((r) => h('small', {}, `🐪 ${cityName(r.from)} → ${cityName(r.to)}`)),
+      ),
+    );
+    openModal(this.modalHost(), T.economy, body);
+  }
+
   private showPromotions(u: Unit): void {
     const host = this.modalHost();
     const body = h(
@@ -1521,6 +1796,9 @@ export class App {
       h('button', { class: 'btn wide', onclick: () => this.showTree('civic') }, '🎭 ' + T.civicTree),
       h('button', { class: 'btn wide', onclick: () => this.showGovernment() }, '🏛 ' + T.government),
       h('button', { class: 'btn wide', onclick: () => this.showDiplomacy() }, '🤝 ' + T.diplomacy),
+      h('button', { class: 'btn wide', onclick: () => this.showEconomy() }, '🪙 ' + T.economy),
+      h('button', { class: 'btn wide', onclick: () => this.showReligion() }, '✨ ' + T.religionTitle),
+      h('button', { class: 'btn wide', onclick: () => this.showGreatPeople() }, '✦ ' + T.greatPeople),
       h('button', { class: 'btn wide', onclick: () => this.showSave() }, '💾 ' + T.save),
       h('button', { class: 'btn wide', onclick: () => this.showLoad(true) }, '📂 ' + T.load),
       h('button', { class: 'btn wide', onclick: () => this.showNewGame(true) }, '✦ ' + T.newGame),

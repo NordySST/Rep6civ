@@ -25,7 +25,7 @@ export const TECHS: TechDef[] = [
     name: 'Navegação à Vela',
     cost: 50,
     prereqs: [],
-    description: 'Libera o Porto e o Farol.',
+    description: 'Libera o Porto, o Farol, a Galé e o embarque de unidades na costa.',
     boost: { description: 'Funde uma cidade costeira.', condition: { type: 'coastalCity' } },
   },
   {
@@ -105,7 +105,7 @@ export const TECHS: TechDef[] = [
     name: 'Navegação Celeste',
     cost: 120,
     prereqs: ['sailing', 'astrology'],
-    description: 'Orientação pelas estrelas.',
+    description: 'Libera a Quadrirreme e a navegação em oceano.',
     boost: { description: 'Explore 15% do mapa.', condition: { type: 'explored', percent: 15 } },
   },
   {

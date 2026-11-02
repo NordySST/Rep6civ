@@ -20,6 +20,10 @@ export interface BuildingDef {
   district?: string;
   /** Edifício exigido antes (ex.: Universidade exige Biblioteca). */
   requiresBuilding?: string;
+  /** Manutenção em ouro por turno (padrão 1; palácio 0). */
+  maintenance?: number;
+  /** Comodidades fornecidas à cidade. */
+  amenities?: number;
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -34,6 +38,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   monument: {
     id: 'monument',
+    maintenance: 0,
     name: 'Monumento',
     cost: 60,
     yields: { culture: 2 },
@@ -41,6 +46,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   granary: {
     id: 'granary',
+    maintenance: 1,
     requiresTech: 'pottery',
     name: 'Celeiro',
     cost: 65,
@@ -50,6 +56,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   watermill: {
     id: 'watermill',
+    maintenance: 1,
     requiresTech: 'wheel',
     name: 'Moinho d’Água',
     cost: 80,
@@ -59,6 +66,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   workshop: {
     id: 'workshop',
+    maintenance: 1,
     district: 'industrial',
     requiresTech: 'engineering',
     name: 'Oficina',
@@ -68,6 +76,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   shrine: {
     id: 'shrine',
+    maintenance: 1,
     district: 'holy-site',
     requiresTech: 'astrology',
     name: 'Santuário',
@@ -77,6 +86,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   library: {
     id: 'library',
+    maintenance: 1,
     district: 'campus',
     requiresTech: 'writing',
     name: 'Biblioteca',
@@ -86,6 +96,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   market: {
     id: 'market',
+    maintenance: 0,
     district: 'commercial',
     requiresTech: 'currency',
     name: 'Mercado',
@@ -95,6 +106,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   university: {
     id: 'university',
+    maintenance: 2,
     name: 'Universidade',
     cost: 160,
     yields: { science: 4 },
@@ -106,25 +118,30 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   temple: {
     id: 'temple',
+    maintenance: 2,
     name: 'Templo',
     cost: 120,
     yields: { faith: 4 },
     requiresCivic: 'mysticism',
     district: 'holy-site',
     requiresBuilding: 'shrine',
-    description: '+4 de fé. Exige Santuário.',
+    amenities: 1,
+    description: '+4 de fé e +1 de comodidade. Exige Santuário.',
   },
   amphitheater: {
     id: 'amphitheater',
+    maintenance: 1,
     name: 'Anfiteatro',
     cost: 130,
     yields: { culture: 3 },
     requiresCivic: 'drama-poetry',
     district: 'theater',
-    description: '+3 de cultura.',
+    amenities: 1,
+    description: '+3 de cultura e +1 de comodidade.',
   },
   barracks: {
     id: 'barracks',
+    maintenance: 1,
     name: 'Quartel',
     cost: 90,
     yields: { production: 1 },
@@ -135,6 +152,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   walls: {
     id: 'walls',
+    maintenance: 0,
     name: 'Muralhas',
     cost: 80,
     yields: {},
@@ -143,6 +161,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
   lighthouse: {
     id: 'lighthouse',
+    maintenance: 0,
     district: 'harbor',
     requiresTech: 'sailing',
     name: 'Farol',

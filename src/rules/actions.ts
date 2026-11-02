@@ -14,6 +14,12 @@ import {
 } from './cities';
 import { canFoundCity, foundCity } from './city';
 import { runBarbarianTurn } from './barbarians';
+import { maintenanceOf } from './economy';
+import { activateGreatPerson, processGreatPeople, type GreatPersonEvent } from './greatPeople';
+import { neighbors } from './hex';
+import { canBuyMissionary, choosePantheon, foundReligion, spreadPressure, spreadReligion, type ReligionEvent } from './religion';
+import { isPassableLand } from './tiles';
+import { cleanRoutes, establishRoute } from './trade';
 import { cannotAttack, cityAttack, clearCampAt, healUnits, promote, resolveAttack, type CombatEvent } from './combat';
 import {
   applyDeal,
@@ -60,6 +66,12 @@ export type Action =
   | { type: 'declareWar'; target: number }
   | { type: 'sendEnvoy'; cityState: number }
   | { type: 'respondProposal'; id: number; accept: boolean }
+  | { type: 'establishRoute'; unitId: number; cityId: number }
+  | { type: 'choosePantheon'; belief: string }
+  | { type: 'foundReligion'; unitId: number; religion: string; follower: string }
+  | { type: 'buyWithFaith'; cityId: number; unit: string }
+  | { type: 'spreadReligion'; unitId: number; cityId: number }
+  | { type: 'activateGreatPerson'; unitId: number }
   | { type: 'endTurn' };
 
 export type GameEvent =
@@ -71,7 +83,12 @@ export type GameEvent =
   | CityEvent
   | ResearchEvent
   | CombatEvent
-  | DiplomacyEvent;
+  | DiplomacyEvent
+  | ReligionEvent
+  | GreatPersonEvent
+  | { type: 'routeCreated'; owner: number; from: number; to: number }
+  | { type: 'routeLost'; owner: number; from: number; to: number }
+  | { type: 'disbanded'; player: number; unitType: string };
 
 export interface ActionResult {
   state: GameState;
@@ -283,6 +300,70 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       }
       break;
     }
+    case 'establishRoute': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = establishRoute(state, u, action.cityId);
+      if (typeof r === 'string') return fail(r);
+      events.push({ type: 'routeCreated', owner: r.owner, from: r.from, to: r.to });
+      break;
+    }
+    case 'choosePantheon': {
+      const why = choosePantheon(state, state.currentPlayer, action.belief);
+      if (why) return fail(why);
+      events.push({ type: 'pantheon', player: state.currentPlayer, belief: action.belief });
+      break;
+    }
+    case 'foundReligion': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = foundReligion(state, u, action.religion, action.follower);
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'buyWithFaith': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      const def = UNITS[action.unit];
+      if (!def?.faithCost) return fail('Esta unidade não é comprada com fé.');
+      const why = canBuyMissionary(state, c);
+      if (why) return fail(why);
+      const pos = [c.pos, ...neighbors(state.map, c.pos)].find(
+        (i) => i >= 0 && isPassableLand(state.map.tiles[i]) && !state.units.some((x) => x.pos === i && UNITS[x.type].class === 'civilian'),
+      );
+      if (pos === undefined) return fail('Sem espaço para a unidade.');
+      state.players[c.owner].faith -= def.faithCost;
+      state.units.push({
+        id: state.nextId++,
+        type: def.id,
+        owner: c.owner,
+        pos,
+        movesLeft: 0,
+        hp: 100,
+        xp: 0,
+        promotions: [],
+        charges: def.spreads,
+        religion: c.religion,
+      });
+      break;
+    }
+    case 'spreadReligion': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = spreadReligion(state, u, action.cityId);
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'activateGreatPerson': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = activateGreatPerson(state, u);
+      if (!r.startsWith('OK:')) return fail(r);
+      events.push({ type: 'info', message: r.slice(3) });
+      break;
+    }
     case 'endTurn': {
       events.push(...endTurn(state));
       events.push({ type: 'turnStarted', turn: state.turn });
@@ -322,6 +403,10 @@ export function endTurn(state: GameState): GameEvent[] {
     events.push(...rev);
   }
   decayGrievances(state);
+  events.push(...payMaintenance(state));
+  events.push(...spreadPressure(state));
+  events.push(...processGreatPeople(state));
+  for (const r of cleanRoutes(state)) events.push({ type: 'routeLost', owner: r.owner, from: r.from, to: r.to });
   // propostas antigas expiram
   state.proposals = state.proposals.filter((p) => state.turn - p.turn < 3);
   healUnits(state);
@@ -342,6 +427,29 @@ export function endTurn(state: GameState): GameEvent[] {
   events.push(...grantPeriodicEnvoys(state));
   events.push(...checkContacts(state));
   events.push(...checkEliminations(state));
+  return events;
+}
+
+/** Cobra manutenção; se o ouro ficar negativo, dispensa unidades militares (muta). */
+export function payMaintenance(state: GameState): GameEvent[] {
+  const events: GameEvent[] = [];
+  for (const p of state.players) {
+    if (p.isBarbarian || p.eliminated || p.isCityState) continue; // cidades-estado não pagam manutenção
+    p.gold -= maintenanceOf(state, p.id).total;
+    while (p.gold < 0) {
+      const mil = state.units
+        .filter((u) => u.owner === p.id && UNITS[u.type].class === 'military')
+        .sort((a, b) => UNITS[a.type].strength - UNITS[b.type].strength || a.id - b.id);
+      if (!mil.length) {
+        p.gold = 0;
+        break;
+      }
+      const victim = mil[0];
+      state.units = state.units.filter((u) => u.id !== victim.id);
+      p.gold += 1 + Math.floor(UNITS[victim.type].cost / 4);
+      events.push({ type: 'disbanded', player: p.id, unitType: victim.type });
+    }
+  }
   return events;
 }
 

@@ -4,8 +4,8 @@ import type { GameState, Unit } from '../state/types';
 import { enemyZoc, promotionMoves } from './combat';
 import { canEnterTerritory } from './diplomacy';
 import { modifiersFor } from './effects';
-import { directionTo, distance, neighbor } from './hex';
-import { enterCost, isPassableLand, riverOnEdge } from './tiles';
+import { directionTo, distance, neighbor, neighbors } from './hex';
+import { enterCost, isPassableLand, isWater, riverOnEdge } from './tiles';
 
 /**
  * Regras de movimento:
@@ -20,9 +20,21 @@ import { enterCost, isPassableLand, riverOnEdge } from './tiles';
  * Custo de entrar em `to` vindo de `from`. Com `zoc` (zona de controle inimiga),
  * mover-se de um hexágono sob ZOC para outro sob ZOC consome todo o movimento.
  */
-export function stepCost(state: GameState, from: number, to: number, zoc?: Set<number>): number {
+export function stepCost(state: GameState, from: number, to: number, zoc?: Set<number>, unit?: Unit): number {
   const { map } = state;
   const t = map.tiles[to];
+  if (unit && (isNaval(unit) || isWater(t) || isWater(map.tiles[from]))) {
+    // navios e unidades embarcadas
+    if (!canEnterTerrain(state, unit, to)) return Infinity;
+    if (directionTo(map, from, to) < 0) return Infinity;
+    const zocStop = !!zoc && zoc.has(from) && zoc.has(to);
+    if (isNaval(unit)) return zocStop ? RIVER_CROSSING_COST : 1;
+    // embarcar ou desembarcar consome todo o movimento
+    const landFrom = !isWater(map.tiles[from]);
+    const landTo = !isWater(t);
+    if (landFrom !== landTo || zocStop) return RIVER_CROSSING_COST;
+    return 1;
+  }
   const base = enterCost(t);
   if (!isFinite(base)) return Infinity;
   const dir = directionTo(map, from, to);
@@ -48,8 +60,35 @@ export function hasRoad(state: GameState, idx: number): boolean {
 /** Marcador: cruzar rio custa "tudo" (limitado ao movimento restante na prática). */
 export const RIVER_CROSSING_COST = 99;
 
+export function isNaval(unit: Unit): boolean {
+  return UNITS[unit.type]?.domain === 'sea';
+}
+
+/**
+ * A unidade pode estar neste hexágono pelo terreno? Navios: costa (oceano com
+ * Navegação Celeste) e as próprias cidades costeiras. Unidades terrestres: terra
+ * transitável; embarcam na costa com Navegação à Vela e no oceano com Navegação Celeste.
+ */
+export function canEnterTerrain(state: GameState, unit: Unit, idx: number): boolean {
+  const t = state.map.tiles[idx];
+  if (!t) return false;
+  const techs = state.players[unit.owner]?.techs ?? [];
+  const oceanOk = techs.includes('celestial-navigation');
+  if (isNaval(unit)) {
+    if (t.terrain === 'coast') return true;
+    if (t.terrain === 'ocean') return oceanOk;
+    return state.cities.some(
+      (c) => c.pos === idx && c.owner === unit.owner && neighbors(state.map, idx).some((n) => n >= 0 && isWater(state.map.tiles[n])),
+    );
+  }
+  if (isPassableLand(t)) return true;
+  if (t.terrain === 'coast') return techs.includes('sailing');
+  if (t.terrain === 'ocean') return oceanOk;
+  return false;
+}
+
 export function canOccupy(state: GameState, unit: Unit, to: number): boolean {
-  if (!isPassableLand(state.map.tiles[to])) return false;
+  if (!canEnterTerrain(state, unit, to)) return false;
   if (!canEnterTerritory(state, unit.owner, state.map.tiles[to].owner)) return false;
   const cls = UNITS[unit.type].class;
   for (const o of state.units) {
@@ -67,7 +106,7 @@ export function moveOneStep(state: GameState, unit: Unit, to: number): boolean {
   if (unit.movesLeft <= 0) return false;
   if (distance(state.map, unit.pos, to) !== 1) return false;
   if (!canOccupy(state, unit, to)) return false;
-  const cost = stepCost(state, unit.pos, to, enemyZoc(state, unit.owner));
+  const cost = stepCost(state, unit.pos, to, enemyZoc(state, unit.owner), unit);
   if (!isFinite(cost)) return false;
   unit.pos = to;
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
@@ -137,7 +176,7 @@ export function simulateTurns(state: GameState, unit: Unit, path: number[]): num
       turns++;
       left = max;
     }
-    left = Math.max(0, left - stepCost(state, pos, step, zoc));
+    left = Math.max(0, left - stepCost(state, pos, step, zoc, unit));
     pos = step;
   }
   return turns;
@@ -163,7 +202,7 @@ export function findPath(state: GameState, unit: Unit, target: number, opts: Pat
     const enemyThere =
       state.units.some((o) => o.pos === target && o.owner !== unit.owner) ||
       state.cities.some((c) => c.pos === target && c.owner !== unit.owner);
-    if (!(opts.allowEnemyGoal && enemyThere && isPassableLand(map.tiles[target]))) return null;
+    if (!(opts.allowEnemyGoal && enemyThere)) return null;
   }
   const max = maxMoves(state, unit);
   const zoc = enemyZoc(state, unit.owner);
@@ -186,14 +225,14 @@ export function findPath(state: GameState, unit: Unit, target: number, opts: Pat
       let cost: number;
       if (!known(nb)) cost = 1;
       else {
-        if (!isPassableLand(map.tiles[nb])) continue;
+        if (!canEnterTerrain(state, unit, nb) && !(nb === target && opts.allowEnemyGoal)) continue;
         if (!canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
         // unidades bloqueiam apenas como destino final ou se forem de outro dono
         if (nb !== target) {
           const enemy = state.units.some((o) => o.pos === nb && o.owner !== unit.owner);
           if (enemy) continue;
         }
-        cost = Math.min(stepCost(state, cur, nb, zoc), max);
+        cost = canEnterTerrain(state, unit, nb) ? Math.min(stepCost(state, cur, nb, zoc, unit), max) : 1;
       }
       const ng = g.get(cur)! + cost;
       if (ng < (g.get(nb) ?? Infinity)) {
@@ -227,9 +266,9 @@ export function reachableThisTurn(state: GameState, unit: Unit): Set<number> {
       if (nb < 0) continue;
       if (state.units.some((o) => o.pos === nb && o.owner !== unit.owner)) continue;
       if (state.cities.some((c) => c.pos === nb && c.owner !== unit.owner)) continue;
-      if (!isPassableLand(map.tiles[nb])) continue;
+      if (!canEnterTerrain(state, unit, nb)) continue;
       if (!canEnterTerritory(state, unit.owner, map.tiles[nb].owner)) continue;
-      const rest = Math.max(0, left - stepCost(state, cur, nb, zoc));
+      const rest = Math.max(0, left - stepCost(state, cur, nb, zoc, unit));
       if (rest > (best.get(nb) ?? -1)) {
         best.set(nb, rest);
         queue.push(nb);

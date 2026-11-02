@@ -408,3 +408,5 @@ input[type='text'] {
 @media (max-width: 430px) {
   .civ-badge { display: none; }
 }
+.dip-card .bar { display: block; width: 100%; height: 5px; background: #0c1117; border-radius: 3px; margin-top: 4px; }
+.dip-card .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }

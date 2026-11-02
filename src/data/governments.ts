@@ -18,7 +18,9 @@ export type Effect =
   | { type: 'builderCharges'; amount: number }
   | { type: 'growthPercent'; percent: number }
   | { type: 'extraMoves'; unit: string; amount: number }
-  | { type: 'cityDefense'; amount: number };
+  | { type: 'cityDefense'; amount: number }
+  | { type: 'amenities'; amount: number }
+  | { type: 'tradeRouteGold'; amount: number };
 
 export interface GovernmentDef {
   id: string;
@@ -114,8 +116,8 @@ export const POLICIES: PolicyDef[] = [
     name: 'Caravançarás',
     slot: 'economic',
     civic: 'foreign-trade',
-    effects: [{ type: 'yieldPercent', yields: { gold: 15 } }],
-    description: '+15% de ouro.',
+    effects: [{ type: 'tradeRouteGold', amount: 2 }],
+    description: '+2 de ouro por rota comercial.',
   },
   {
     id: 'revelation',

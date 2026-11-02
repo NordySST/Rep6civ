@@ -30,6 +30,19 @@ export interface UnitDef {
   canFoundCity?: boolean;
   /** Só aparece para bárbaros (não pode ser produzida). */
   barbarianOnly?: boolean;
+  /** Domínio: terrestre (padrão) ou naval. */
+  domain?: 'land' | 'sea';
+  requiresCivic?: string;
+  /** Custo em fé (comprável só com fé, ex.: missionário). */
+  faithCost?: number;
+  /** Comerciante: cria rotas comerciais. */
+  trader?: boolean;
+  /** Missionário: nº de difusões. */
+  spreads?: number;
+  /** Grande personalidade (não produzível). */
+  greatPerson?: string;
+  /** Exige cidade costeira para produzir. */
+  needsCoast?: boolean;
   description: string;
 }
 
@@ -170,6 +183,70 @@ export const UNITS: Record<string, UnitDef> = {
     glyph: '☄',
     description: 'Cerco: +15 de força contra cidades.',
   },
+  trader: {
+    id: 'trader',
+    name: 'Comerciante',
+    class: 'civilian',
+    moves: 2,
+    cost: 50,
+    sight: 2,
+    strength: 0,
+    requiresCivic: 'foreign-trade',
+    trader: true,
+    glyph: '🐪',
+    description: 'Estabelece uma rota comercial a partir da cidade onde está.',
+  },
+  missionary: {
+    id: 'missionary',
+    name: 'Missionário',
+    class: 'civilian',
+    moves: 3,
+    cost: 0,
+    faithCost: 80,
+    sight: 2,
+    strength: 0,
+    spreads: 3,
+    glyph: '☦',
+    description: 'Difunde a sua religião em cidades (3 usos). Comprado com fé.',
+  },
+  galley: {
+    id: 'galley',
+    name: 'Galé',
+    class: 'military',
+    combat: 'melee',
+    domain: 'sea',
+    moves: 3,
+    cost: 65,
+    sight: 2,
+    strength: 25,
+    requiresTech: 'sailing',
+    needsCoast: true,
+    glyph: '⛵',
+    description: 'Navio corpo a corpo. Só navega na costa até a Navegação Celeste.',
+  },
+  quadrireme: {
+    id: 'quadrireme',
+    name: 'Quadrirreme',
+    class: 'military',
+    combat: 'ranged',
+    domain: 'sea',
+    moves: 3,
+    cost: 80,
+    sight: 2,
+    strength: 20,
+    rangedStrength: 25,
+    range: 1,
+    requiresTech: 'celestial-navigation',
+    needsCoast: true,
+    glyph: '🚢',
+    description: 'Navio de ataque à distância.',
+  },
+  'great-scientist': { id: 'great-scientist', name: 'Grande Cientista', class: 'civilian', moves: 3, cost: 0, sight: 2, strength: 0, greatPerson: 'scientist', glyph: '🧪', description: 'Ative para receber ciência equivalente a 50% da pesquisa atual.' },
+  'great-engineer': { id: 'great-engineer', name: 'Grande Engenheiro', class: 'civilian', moves: 3, cost: 0, sight: 2, strength: 0, greatPerson: 'engineer', glyph: '📐', description: 'Ative numa cidade sua para +150 de produção no item atual.' },
+  'great-merchant': { id: 'great-merchant', name: 'Grande Mercador', class: 'civilian', moves: 3, cost: 0, sight: 2, strength: 0, greatPerson: 'merchant', glyph: '💰', description: 'Ative para receber 200 de ouro.' },
+  'great-prophet': { id: 'great-prophet', name: 'Grande Profeta', class: 'civilian', moves: 3, cost: 0, sight: 2, strength: 0, greatPerson: 'prophet', glyph: '🕯', description: 'Ative numa cidade com Lugar Sagrado para fundar uma religião.' },
+  'great-general': { id: 'great-general', name: 'Grande General', class: 'civilian', moves: 3, cost: 0, sight: 2, strength: 0, greatPerson: 'general', glyph: '🎖', description: 'Ative para dar 30 de XP às unidades militares a até 2 hexágonos.' },
+  'great-writer': { id: 'great-writer', name: 'Grande Escritor', class: 'civilian', moves: 3, cost: 0, sight: 2, strength: 0, greatPerson: 'writer', glyph: '📜', description: 'Ative para receber cultura equivalente a 50% da cívica atual.' },
   'barbarian-raider': {
     id: 'barbarian-raider',
     name: 'Saqueador',
@@ -186,4 +263,19 @@ export const UNITS: Record<string, UnitDef> = {
 };
 
 /** Ordem de exibição no menu de produção. */
-export const UNIT_ORDER = ['settler', 'builder', 'scout', 'warrior', 'slinger', 'archer', 'spearman', 'swordsman', 'horseman', 'catapult'];
+export const UNIT_ORDER = [
+  'settler',
+  'builder',
+  'trader',
+  'missionary',
+  'scout',
+  'warrior',
+  'slinger',
+  'archer',
+  'spearman',
+  'swordsman',
+  'horseman',
+  'catapult',
+  'galley',
+  'quadrireme',
+];

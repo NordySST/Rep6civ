@@ -51,6 +51,7 @@ export function makePlayer(id: number, civId: string, tiles: number, extra: Part
     policies: [],
     policyChangeAvailable: false,
     envoyTokens: 0,
+    gpPoints: {},
     ...extra,
   };
 }
@@ -80,6 +81,9 @@ export function newGame(opts: NewGameOptions): GameState {
     camps: [],
     diplomacy: {},
     proposals: [],
+    tradeRoutes: [],
+    religions: [],
+    gpRecruited: {},
     nextId: 1,
     rngCounter: 0,
   };
