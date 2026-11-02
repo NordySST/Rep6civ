@@ -373,6 +373,10 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   a vez ao próximo humano e a tela de passagem esconde o mapa; o último humano fecha a
   rodada (`playEndTurn`, que recomeça pelo primeiro humano ativo). Propostas entre humanos
   ficam pendentes e são respondidas na vez do outro.
+- Avisos no multijogador local: cada evento é traduzido do ponto de vista de cada humano
+  (`eventMessage(ev, state, viewer)`); quem não está jogando (ou todos, no fim da rodada/
+  `passTurn`) recebe na caixa por jogador (`rep6civ.inbox.<semente>` no `localStorage`),
+  mostrada como "Enquanto você aguardava" ao começar a vez, antes das propostas.
 
 ## Plano das 8 etapas
 

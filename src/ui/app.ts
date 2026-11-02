@@ -292,7 +292,7 @@ export class App {
     const before = new Map(this.state.units.filter((u) => u.owner === this.state!.currentPlayer).map((u) => [u.id, u.pos]));
     // o fim de turno passa pela IA (rivais e cidades-estado jogam antes da rodada terminar)
     const result = action.type === 'endTurn' ? playEndTurn(this.state) : applyAction(this.state, action);
-    const ok = this.applyResult(result);
+    const ok = this.applyResult(result, action.type === 'endTurn' || action.type === 'passTurn');
     if (ok) this.animateResult(before, result.events, action.type === 'endTurn');
     return ok;
   }
@@ -336,7 +336,12 @@ export class App {
     this.invalidate();
   }
 
-  private applyResult({ state, events }: ActionResult): boolean {
+  /**
+   * Aplica o resultado e distribui os avisos. No multijogador local, cada humano recebe os
+   * avisos do ponto de vista dele: quem está jogando vê na hora; os demais (ou todos, ao
+   * passar a vez/fechar a rodada) recebem na caixa de entrada, mostrada no início da vez.
+   */
+  private applyResult({ state, events }: ActionResult, deferAll = false): boolean {
     if (!this.state) return false;
     let ok = true;
     for (const ev of events) {
@@ -348,27 +353,96 @@ export class App {
     }
     if (ok) {
       this.setState(state);
-      const msgs = events.map((ev) => this.eventMessage(ev, state)).filter((m): m is string => !!m);
-      if (msgs.length) this.toast(msgs.slice(0, 3).join('\n') + (msgs.length > 3 ? `\n(+${msgs.length - 3})` : ''));
+      const humans = activeHumans(state);
+      this.deferMessages = deferAll;
+      if (humans.length > 1) {
+        for (const h of humans) {
+          const msgs = events.map((ev) => this.eventMessage(ev, state, h)).filter((m): m is string => !!m);
+          if (!msgs.length) continue;
+          if (!deferAll && h === state.currentPlayer) this.showMessages(msgs);
+          else (this.inbox[h] ??= []).push(...msgs);
+        }
+        this.saveInbox();
+      } else {
+        this.showMessages(events.map((ev) => this.eventMessage(ev, state)).filter((m): m is string => !!m));
+      }
+      this.deferMessages = false;
     }
     return ok;
   }
 
-  private eventMessage(ev: ReturnType<typeof applyAction>['events'][number], s: GameState): string | null {
+  private showMessages(msgs: string[]): void {
+    if (msgs.length) this.toast(msgs.slice(0, 3).join('\n') + (msgs.length > 3 ? `\n(+${msgs.length - 3})` : ''));
+  }
+
+  /** Caixa de entrada do multijogador local, guardada no aparelho junto com a partida. */
+  private inbox: Record<number, string[]> = {};
+  /** Avisos sendo guardados para depois (passagem de vez): sem dicas na tela. */
+  private deferMessages = false;
+  private inboxKey(): string {
+    return `rep6civ.inbox.${this.state?.settings.seed ?? ''}`;
+  }
+  private saveInbox(): void {
+    try {
+      localStorage.setItem(this.inboxKey(), JSON.stringify(this.inbox));
+    } catch {
+      /* sem armazenamento: a caixa fica só na memória */
+    }
+  }
+  private loadInbox(): void {
+    try {
+      this.inbox = JSON.parse(localStorage.getItem(this.inboxKey()) ?? '{}') ?? {};
+    } catch {
+      this.inbox = {};
+    }
+  }
+
+  /** Mostra (e esvazia) os avisos guardados para o jogador atual. */
+  private showInbox(): void {
+    const s = this.state;
+    if (!s) return;
+    const msgs = this.inbox[s.currentPlayer] ?? [];
+    if (!msgs.length) return;
+    delete this.inbox[s.currentPlayer];
+    this.saveInbox();
+    const host = this.modalHost();
+    openModal(
+      host,
+      T.inboxTitle,
+      h(
+        'div',
+        { class: 'form' },
+        ...msgs.map((m) => h('div', { class: 'dip-card' }, h('small', {}, m))),
+        h(
+          'button',
+          {
+            class: 'btn primary wide',
+            onclick: () => {
+              closeModal(host);
+              if (s.proposals.some((x) => x.to === s.currentPlayer)) this.showProposals();
+            },
+          },
+          T.gotIt,
+        ),
+      ),
+    );
+  }
+
+  private eventMessage(ev: ReturnType<typeof applyAction>['events'][number], s: GameState, viewer = s.currentPlayer): string | null {
     const cname = (id: number) => s.cities.find((c) => c.id === id)?.name ?? '';
-    const mineCity = (id: number) => s.cities.find((c) => c.id === id)?.owner === s.currentPlayer;
+    const mineCity = (id: number) => s.cities.find((c) => c.id === id)?.owner === viewer;
     switch (ev.type) {
       case 'cityFounded': {
         const owner = s.cities.find((c) => c.id === ev.cityId)?.owner;
-        if (owner === s.currentPlayer) return T.cityFounded(ev.name);
-        return owner !== undefined && hasMet(s, s.currentPlayer, owner) && !s.players[owner].isCityState
+        if (owner === viewer) return T.cityFounded(ev.name);
+        return owner !== undefined && hasMet(s, viewer, owner) && !s.players[owner].isCityState
           ? T.cityFoundedBy(playerName(s, owner), ev.name)
           : null;
       }
       case 'produced': {
         const owner = s.cities.find((c) => c.id === ev.cityId)?.owner;
         if (ev.item.kind === 'wonder') return T.wonderBuilt(itemName(ev.item), owner === undefined ? '?' : playerName(s, owner));
-        return owner === s.currentPlayer ? T.produced(cname(ev.cityId), itemName(ev.item)) : null;
+        return owner === viewer ? T.produced(cname(ev.cityId), itemName(ev.item)) : null;
       }
       case 'grew':
         return mineCity(ev.cityId) ? T.grew(cname(ev.cityId), ev.population) : null;
@@ -380,8 +454,8 @@ export class App {
         return ev.message;
       case 'combat': {
         const atk = ev.attackerType === 'city' ? T.cityWord : UNITS[ev.attackerType]?.name ?? ev.attackerType;
-        const mine = ev.attackerOwner === s.currentPlayer;
-        const theirs = ev.defenderOwner === s.currentPlayer;
+        const mine = ev.attackerOwner === viewer;
+        const theirs = ev.defenderOwner === viewer;
         if (!mine && !theirs) return null;
         let m = T.combatMsg(atk, ev.targetName, ev.damageToTarget, ev.damageToAttacker, !mine);
         if (ev.targetKilled) m += ' ' + T.killed(ev.targetName);
@@ -389,84 +463,84 @@ export class App {
         return m;
       }
       case 'captured':
-        if (ev.by === s.currentPlayer) return T.capturedMsg(UNITS[ev.unitType]?.name ?? ev.unitType);
-        return ev.from === s.currentPlayer ? T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
+        if (ev.by === viewer) return T.capturedMsg(UNITS[ev.unitType]?.name ?? ev.unitType);
+        return ev.from === viewer ? T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
       case 'cityCaptured':
-        return ev.by === s.currentPlayer || hasMet(s, s.currentPlayer, ev.by) ? T.cityCapturedMsg(ev.name) : null;
+        return ev.by === viewer || hasMet(s, viewer, ev.by) ? T.cityCapturedMsg(ev.name) : null;
       case 'campCleared':
-        return ev.by === s.currentPlayer ? T.campCleared(ev.gold) : null;
+        return ev.by === viewer ? T.campCleared(ev.gold) : null;
       case 'unitLost':
-        return ev.owner === s.currentPlayer ? T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
+        return ev.owner === viewer ? T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
       case 'firstContact': {
-        const me = s.currentPlayer;
+        const me = viewer;
         if (ev.a !== me && ev.b !== me) return null;
-        this.tip('contact');
+        if (viewer === s.currentPlayer && !this.deferMessages) this.tip('contact');
         return T.firstContact(playerName(s, ev.a === me ? ev.b : ev.a));
       }
       case 'warDeclared':
-        if (ev.on === s.currentPlayer) return T.warOnUs(playerName(s, ev.by));
-        if (ev.by === s.currentPlayer) return T.weDeclared(playerName(s, ev.on));
-        return hasMet(s, s.currentPlayer, ev.by) ? T.warBetween(playerName(s, ev.by), playerName(s, ev.on)) : null;
+        if (ev.on === viewer) return T.warOnUs(playerName(s, ev.by));
+        if (ev.by === viewer) return T.weDeclared(playerName(s, ev.on));
+        return hasMet(s, viewer, ev.by) ? T.warBetween(playerName(s, ev.by), playerName(s, ev.on)) : null;
       case 'peaceMade': {
-        const me = s.currentPlayer;
+        const me = viewer;
         if (ev.a === me || ev.b === me) return T.peaceWith(playerName(s, ev.a === me ? ev.b : ev.a));
         return null;
       }
       case 'agreement': {
-        const me = s.currentPlayer;
+        const me = viewer;
         if (ev.a !== me && ev.b !== me) return null;
         return T.agreementMsg(ev.item, playerName(s, ev.a === me ? ev.b : ev.a));
       }
       case 'dealRejected':
         return T.dealRejected(playerName(s, ev.by), ev.reason);
       case 'suzerainChanged':
-        return hasMet(s, s.currentPlayer, ev.cityState)
+        return hasMet(s, viewer, ev.cityState)
           ? T.suzerainMsg(playerName(s, ev.cityState), ev.suzerain === null ? null : playerName(s, ev.suzerain))
           : null;
       case 'eliminated':
-        return hasMet(s, s.currentPlayer, ev.player) ? T.eliminatedMsg(playerName(s, ev.player)) : null;
+        return hasMet(s, viewer, ev.player) ? T.eliminatedMsg(playerName(s, ev.player)) : null;
       case 'envoyGained':
-        return ev.player === s.currentPlayer ? T.envoyGained : null;
+        return ev.player === viewer ? T.envoyGained : null;
       case 'theology':
-        if (ev.attacker !== s.currentPlayer && ev.defender !== s.currentPlayer) return null;
+        if (ev.attacker !== viewer && ev.defender !== viewer) return null;
         return T.theologyMsg(religionLabel(ev.winnerReligion), religionLabel(ev.loserReligion));
       case 'disbanded':
-        return ev.player === s.currentPlayer ? T.disbandedMsg(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
+        return ev.player === viewer ? T.disbandedMsg(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
       case 'routeCreated':
-        return ev.owner === s.currentPlayer ? T.routeCreated(cname(ev.from), cname(ev.to)) : null;
+        return ev.owner === viewer ? T.routeCreated(cname(ev.from), cname(ev.to)) : null;
       case 'routeLost':
-        return ev.owner === s.currentPlayer ? T.routeLost(cname(ev.from), cname(ev.to)) : null;
+        return ev.owner === viewer ? T.routeLost(cname(ev.from), cname(ev.to)) : null;
       case 'pantheon':
-        return ev.player === s.currentPlayer ? T.pantheonMsg(PANTHEON_BY_ID[ev.belief]?.name ?? ev.belief) : null;
+        return ev.player === viewer ? T.pantheonMsg(PANTHEON_BY_ID[ev.belief]?.name ?? ev.belief) : null;
       case 'religionFounded':
         return T.religionFoundedMsg(playerName(s, ev.player), religionLabel(ev.religion));
       case 'cityConverted': {
         const c = s.cities.find((x) => x.id === ev.cityId);
-        return c && c.owner === s.currentPlayer ? T.convertedMsg(c.name, religionLabel(ev.religion)) : null;
+        return c && c.owner === viewer ? T.convertedMsg(c.name, religionLabel(ev.religion)) : null;
       }
       case 'greatPerson': {
         const def = GREAT_PERSON_TYPES[ev.gpType];
-        return ev.player === s.currentPlayer ? T.gpRecruited(ev.name, def.name) : hasMet(s, s.currentPlayer, ev.player) ? T.gpOther(playerName(s, ev.player), ev.name) : null;
+        return ev.player === viewer ? T.gpRecruited(ev.name, def.name) : hasMet(s, viewer, ev.player) ? T.gpOther(playerName(s, ev.player), ev.name) : null;
       }
       case 'researchAgreementDone':
-        return ev.a === s.currentPlayer || ev.b === s.currentPlayer ? T.researchDone(ev.science) : null;
+        return ev.a === viewer || ev.b === viewer ? T.researchDone(ev.science) : null;
       case 'luxuryDealEnded':
-        return ev.from === s.currentPlayer || ev.to === s.currentPlayer ? T.luxuryEnded(RESOURCE_BY_ID[ev.resource]?.name ?? ev.resource) : null;
+        return ev.from === viewer || ev.to === viewer ? T.luxuryEnded(RESOURCE_BY_ID[ev.resource]?.name ?? ev.resource) : null;
       case 'eraChanged':
-        return ev.player === s.currentPlayer ? T.eraMsg(ev.era) : null;
+        return ev.player === viewer ? T.eraMsg(ev.era) : null;
       case 'victory':
         return null;
       case 'techDone':
-        return ev.playerId === s.currentPlayer ? T.techDone(TECH_BY_ID[ev.id]?.name ?? ev.id) : null;
+        return ev.playerId === viewer ? T.techDone(TECH_BY_ID[ev.id]?.name ?? ev.id) : null;
       case 'civicDone':
-        if (ev.playerId === s.currentPlayer && s.players[s.currentPlayer].government) this.tip('policies');
-        return ev.playerId === s.currentPlayer ? `${T.civicDone(CIVIC_BY_ID[ev.id]?.name ?? ev.id)} ${T.policyWindow}` : null;
+        if (ev.playerId === viewer && viewer === s.currentPlayer && !this.deferMessages && s.players[viewer].government) this.tip('policies');
+        return ev.playerId === viewer ? `${T.civicDone(CIVIC_BY_ID[ev.id]?.name ?? ev.id)} ${T.policyWindow}` : null;
       case 'boost':
-        return ev.playerId === s.currentPlayer
+        return ev.playerId === viewer
           ? T.boosted(ev.kind, (ev.kind === 'tech' ? TECH_BY_ID : CIVIC_BY_ID)[ev.id]?.name ?? ev.id)
           : null;
       case 'governmentUnlocked':
-        return ev.playerId === s.currentPlayer ? T.govUnlocked(GOVERNMENT_BY_ID[ev.id]?.name ?? ev.id) : null;
+        return ev.playerId === viewer ? T.govUnlocked(GOVERNMENT_BY_ID[ev.id]?.name ?? ev.id) : null;
       default:
         return null;
     }
@@ -656,6 +730,8 @@ export class App {
     this.selectedTile = undefined;
     this.pendingPath = undefined;
     this.setState(s);
+    this.inbox = {};
+    this.saveInbox();
     this.cam.zoom = 1.1;
     this.victoryShown = false;
     this.tip('welcome');
@@ -2053,7 +2129,8 @@ export class App {
               if (w && !this.victoryShown) {
                 this.victoryShown = true;
                 this.showVictory();
-              } else if (s.proposals.some((x) => x.to === s.currentPlayer)) this.showProposals();
+              } else if (this.inbox[s.currentPlayer]?.length) this.showInbox();
+              else if (s.proposals.some((x) => x.to === s.currentPlayer)) this.showProposals();
             },
           },
           '▶ ' + T.startTurn,
@@ -2368,6 +2445,7 @@ export class App {
       this.pendingPath = undefined;
       this.selectedCityId = undefined;
       this.setState(normalizeState(s));
+      this.loadInbox();
       this.victoryShown = !!s.winner;
       if (!this.selectNextUnit()) this.centerOnSelection();
       this.toast(T.loaded);
