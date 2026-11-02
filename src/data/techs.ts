@@ -11,15 +11,15 @@ export interface TechDef {
 }
 
 export const TECHS: TechDef[] = [
-  { id: 'pottery', name: 'Cerâmica', cost: 25, prereqs: [], description: 'Libera o Celeiro.' },
+  { id: 'pottery', name: 'Cerâmica', cost: 20, prereqs: [], description: 'Libera o Celeiro.' },
   {
     id: 'animal-husbandry',
     name: 'Pecuária',
-    cost: 25,
+    cost: 20,
     prereqs: [],
     description: 'Libera Pastagem e Acampamento. Revela Cavalos.',
   },
-  { id: 'mining', name: 'Mineração', cost: 25, prereqs: [], description: 'Libera Mina e Pedreira.' },
+  { id: 'mining', name: 'Mineração', cost: 20, prereqs: [], description: 'Libera Mina e Pedreira.' },
   {
     id: 'sailing',
     name: 'Navegação à Vela',

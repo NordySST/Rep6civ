@@ -134,6 +134,13 @@ export const MIGRATIONS: MigrationTable = {
     religions: s.religions ?? [],
     gpRecruited: s.gpRecruited ?? {},
   }),
+  // v7 → v8 (etapa 8): vitória, cultura acumulada, capitais originais, limite de turnos.
+  7: (s) => ({
+    ...s,
+    settings: { turnLimit: 250, ...s.settings },
+    players: s.players.map((p: any) => ({ lifetimeCulture: p.culture ?? 0, ...p })),
+    cities: s.cities.map((c: any) => (c.isCapital && c.originalCapitalOf === undefined ? { ...c, originalCapitalOf: c.owner } : c)),
+  }),
 };
 
 export class SaveError extends Error {}

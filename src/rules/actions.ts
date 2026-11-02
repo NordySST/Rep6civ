@@ -1,6 +1,6 @@
 import type { ImprovementId } from '../data/improvements';
 import { UNITS } from '../data/units';
-import type { CityFocus, GameState, ProductionItem, Unit } from '../state/types';
+import type { CityFocus, GameState, ProductionItem, Unit, VictoryType } from '../state/types';
 import { buildImprovement, buildRoad, removeFeature } from './builders';
 import {
   assignCitizens,
@@ -14,6 +14,7 @@ import {
 } from './cities';
 import { canFoundCity, foundCity } from './city';
 import { runBarbarianTurn } from './barbarians';
+import { checkVictory, playerEra } from './victory';
 import { maintenanceOf } from './economy';
 import { activateGreatPerson, processGreatPeople, type GreatPersonEvent } from './greatPeople';
 import { neighbors } from './hex';
@@ -88,7 +89,9 @@ export type GameEvent =
   | GreatPersonEvent
   | { type: 'routeCreated'; owner: number; from: number; to: number }
   | { type: 'routeLost'; owner: number; from: number; to: number }
-  | { type: 'disbanded'; player: number; unitType: string };
+  | { type: 'disbanded'; player: number; unitType: string }
+  | { type: 'victory'; player: number; victory: VictoryType }
+  | { type: 'eraChanged'; player: number; era: string };
 
 export interface ActionResult {
   state: GameState;
@@ -390,6 +393,8 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
 /** Fim de turno (muta). Processa cidades, depois renova unidades. */
 export function endTurn(state: GameState): GameEvent[] {
   const events: GameEvent[] = [];
+  const erasBefore = state.players.map((p) => playerEra(state, p.id).index);
+  const hadWinner = !!state.winner;
   for (const p of state.players) p.policyChangeAvailable = false;
   // turno dos bárbaros (depois dos jogadores)
   events.push(...runBarbarianTurn(state));
@@ -427,6 +432,13 @@ export function endTurn(state: GameState): GameEvent[] {
   events.push(...grantPeriodicEnvoys(state));
   events.push(...checkContacts(state));
   events.push(...checkEliminations(state));
+  for (const p of state.players) {
+    if (p.isBarbarian || p.isCityState) continue;
+    const e = playerEra(state, p.id);
+    if (e.index > erasBefore[p.id]) events.push({ type: 'eraChanged', player: p.id, era: e.name });
+  }
+  checkVictory(state);
+  if (state.winner && !hadWinner) events.push({ type: 'victory', player: state.winner.player, victory: state.winner.type });
   return events;
 }
 

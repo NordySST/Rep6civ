@@ -62,7 +62,10 @@ export function foundCity(state: GameState, unit: Unit): City {
     wonders: [],
     pressure: {},
   };
-  if (city.isCapital) city.buildings.push('palace');
+  if (city.isCapital) {
+    city.buildings.push('palace');
+    if (!state.players[unit.owner].isCityState && p.citiesFounded <= 1) city.originalCapitalOf = unit.owner;
+  }
   p.citiesFounded++;
   state.cities.push(city);
   for (const i of tilesInRadius(state.map, unit.pos, INITIAL_TERRITORY_RADIUS)) {

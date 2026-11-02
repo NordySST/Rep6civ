@@ -267,7 +267,7 @@ export type CombatEvent =
       attackerKilled: boolean;
       pos: number;
     }
-  | { type: 'captured'; by: number; unitType: string; pos: number }
+  | { type: 'captured'; by: number; from: number; unitType: string; pos: number }
   | { type: 'cityCaptured'; cityId: number; name: string; by: number }
   | { type: 'campCleared'; by: number; pos: number; gold: number }
   | { type: 'unitLost'; owner: number; unitType: string; pos: number };
@@ -324,6 +324,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
     const others = state.units.filter((x) => x.pos === pos && x.id !== target.unit.id && atWar(state, u.owner, x.owner));
     if (!others.length) {
       const captured = target.unit;
+      const victimOwner = captured.owner;
       if (state.players[u.owner].isBarbarian || captured.type === 'settler') {
         // bárbaros destroem; colono capturado vira construtor
         if (state.players[u.owner].isBarbarian) removeUnit(state, captured);
@@ -338,7 +339,7 @@ export function resolveAttack(state: GameState, u: Unit, pos: number): CombatEve
         captured.movesLeft = 0;
         delete captured.path;
       }
-      events.push({ type: 'captured', by: u.owner, unitType: captured.type, pos });
+      events.push({ type: 'captured', by: u.owner, from: victimOwner, unitType: captured.type, pos });
       if (canEnterTerrain(state, u, pos)) u.pos = pos;
       const camp = clearCampAt(state, u);
       if (camp) events.push(camp);

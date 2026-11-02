@@ -49,6 +49,18 @@ import {
   workableTiles,
 } from '../rules/cities';
 import { canFoundCity } from '../rules/city';
+import {
+  cultureProgress,
+  dominationProgress,
+  playerEra,
+  religionProgress,
+  scienceProgress,
+  scoreOf,
+  VICTORY_LABELS,
+} from '../rules/victory';
+import { loadPrefs, savePrefs, applyPrefs, type Prefs } from './prefs';
+import { play, setSoundEnabled, unlockAudio, type Sfx } from './audio';
+import { TIPS } from './tutorial';
 import { cityAmenities, improvedLuxuries, maintenanceOf } from '../rules/economy';
 import { gpCost, gpPerTurn } from '../rules/greatPeople';
 import {
@@ -124,6 +136,10 @@ export class App {
   private revealAll = false;
   private dirty = true;
   private toastTimer = 0;
+  private prefs: Prefs = loadPrefs();
+  private victoryShown = false;
+  private anims: { unitId: number; from: { x: number; y: number }; to: { x: number; y: number }; start: number; dur: number }[] = [];
+  private floaters: { x: number; y: number; text: string; color: string; start: number }[] = [];
 
   private el = {
     canvas: h('canvas', { id: 'map', 'aria-label': 'Mapa do jogo' }),
@@ -132,12 +148,20 @@ export class App {
     panel: h('section', { class: 'panel', 'aria-live': 'polite' }),
     endTurn: h('button', { class: 'btn primary end-turn' }, T.nextTurn),
     toast: h('div', { class: 'toast', role: 'status' }),
+    tip: h('div', { class: 'tip', hidden: true, role: 'note' }),
     modal: h('div', { class: 'modal', hidden: true }),
   };
 
   constructor(root: HTMLElement) {
     const bottom = h('div', { class: 'bottombar' }, this.el.panel, this.el.endTurn);
-    root.append(this.el.canvas, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal);
+    applyPrefs(this.prefs);
+    setSoundEnabled(this.prefs.sound);
+    // áudio só pode começar após um gesto; cliques em botões fazem um "tique"
+    root.addEventListener('pointerdown', () => unlockAudio(), { capture: true });
+    root.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest?.('button')) play('click');
+    });
+    root.append(this.el.canvas, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal, this.el.tip);
     this.renderer = new Renderer(this.el.canvas);
 
     this.el.zoom.append(
@@ -174,8 +198,22 @@ export class App {
   }
 
   private loop = () => {
+    const now = performance.now();
+    this.anims = this.anims.filter((a) => now - a.start < a.dur);
+    this.floaters = this.floaters.filter((f) => now - f.start < 1100);
+    if (this.anims.length || this.floaters.length) this.dirty = true;
     if (this.dirty && this.state) {
       this.dirty = false;
+      const unitPositions = new Map<number, { x: number; y: number }>();
+      for (const a of this.anims) {
+        const t = Math.min(1, (now - a.start) / a.dur);
+        const e = t * (2 - t);
+        unitPositions.set(a.unitId, { x: a.from.x + (a.to.x - a.from.x) * e, y: a.from.y + (a.to.y - a.from.y) * e });
+      }
+      const floaters = this.floaters.map((f) => {
+        const t = (now - f.start) / 1100;
+        return { x: f.x, y: f.y - 24 * t, text: f.text, color: f.color, alpha: 1 - t * t };
+      });
       const overlay: Overlay = {
         selectedUnitId: this.selectedUnitId,
         selectedTile: this.selectedTile,
@@ -188,6 +226,8 @@ export class App {
         placement: this.placementOverlay(),
         pendingAttack: this.pendingAttack,
         cityInfo: this.cityInfo(),
+        unitPositions: unitPositions.size ? unitPositions : undefined,
+        floaters,
       };
       this.renderer.draw(this.state, this.cam, this.vis, overlay);
     }
@@ -222,8 +262,39 @@ export class App {
 
   private dispatch(action: Action): boolean {
     if (!this.state) return false;
+    const before = new Map(this.state.units.filter((u) => u.owner === this.state!.currentPlayer).map((u) => [u.id, u.pos]));
     // o fim de turno passa pela IA (rivais e cidades-estado jogam antes da rodada terminar)
-    return this.applyResult(action.type === 'endTurn' ? playEndTurn(this.state) : applyAction(this.state, action));
+    const result = action.type === 'endTurn' ? playEndTurn(this.state) : applyAction(this.state, action);
+    const ok = this.applyResult(result);
+    if (ok) this.animateResult(before, result.events, action.type === 'endTurn');
+    return ok;
+  }
+
+  private animateResult(before: Map<number, number>, events: ActionResult['events'], endTurn: boolean): void {
+    const s = this.state!;
+    const now = performance.now();
+    if (this.prefs.animations && !endTurn) {
+      for (const u of s.units) {
+        const from = before.get(u.id);
+        if (from === undefined || from === u.pos) continue;
+        const d = distance(s.map, from, u.pos);
+        this.anims.push({ unitId: u.id, from: tileCenter(s, from), to: tileCenter(s, u.pos), start: now, dur: Math.min(450, 120 + d * 90) });
+      }
+    }
+    let sfx: Sfx | null = endTurn ? 'endTurn' : null;
+    for (const ev of events) {
+      if (ev.type === 'combat') {
+        if (this.revealAll || this.vis[ev.pos]) {
+          const c = tileCenter(s, ev.pos);
+          if (this.prefs.animations) this.floaters.push({ x: c.x, y: c.y - 8, text: `−${ev.damageToTarget}`, color: '#ff6b5b', start: now });
+        }
+        if (ev.attackerOwner === s.currentPlayer || ev.defenderOwner === s.currentPlayer) sfx = 'combat';
+      } else if (ev.type === 'cityFounded') sfx = 'city';
+      else if (ev.type === 'firstContact' || ev.type === 'warDeclared' || ev.type === 'eraChanged' || ev.type === 'greatPerson') sfx = sfx ?? 'notify';
+      else if (ev.type === 'victory') sfx = 'victory';
+    }
+    if (sfx) play(sfx);
+    this.invalidate();
   }
 
   private applyResult({ state, events }: ActionResult): boolean {
@@ -232,6 +303,7 @@ export class App {
     for (const ev of events) {
       if (ev.type === 'error') {
         this.toast(ev.message);
+        play('error');
         ok = false;
       }
     }
@@ -245,20 +317,26 @@ export class App {
 
   private eventMessage(ev: ReturnType<typeof applyAction>['events'][number], s: GameState): string | null {
     const cname = (id: number) => s.cities.find((c) => c.id === id)?.name ?? '';
+    const mineCity = (id: number) => s.cities.find((c) => c.id === id)?.owner === s.currentPlayer;
     switch (ev.type) {
-      case 'cityFounded':
-        return T.cityFounded(ev.name);
+      case 'cityFounded': {
+        const owner = s.cities.find((c) => c.id === ev.cityId)?.owner;
+        if (owner === s.currentPlayer) return T.cityFounded(ev.name);
+        return owner !== undefined && hasMet(s, s.currentPlayer, owner) && !s.players[owner].isCityState
+          ? T.cityFoundedBy(playerName(s, owner), ev.name)
+          : null;
+      }
       case 'produced': {
         const owner = s.cities.find((c) => c.id === ev.cityId)?.owner;
         if (ev.item.kind === 'wonder') return T.wonderBuilt(itemName(ev.item), owner === undefined ? '?' : playerName(s, owner));
         return owner === s.currentPlayer ? T.produced(cname(ev.cityId), itemName(ev.item)) : null;
       }
       case 'grew':
-        return T.grew(cname(ev.cityId), ev.population);
+        return mineCity(ev.cityId) ? T.grew(cname(ev.cityId), ev.population) : null;
       case 'starved':
-        return T.starved(cname(ev.cityId), ev.population);
+        return mineCity(ev.cityId) ? T.starved(cname(ev.cityId), ev.population) : null;
       case 'borderGrew':
-        return T.borderGrew(cname(ev.cityId));
+        return mineCity(ev.cityId) ? T.borderGrew(cname(ev.cityId)) : null;
       case 'info':
         return ev.message;
       case 'combat': {
@@ -272,9 +350,10 @@ export class App {
         return m;
       }
       case 'captured':
-        return ev.by === s.currentPlayer ? T.capturedMsg(UNITS[ev.unitType]?.name ?? ev.unitType) : T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType);
+        if (ev.by === s.currentPlayer) return T.capturedMsg(UNITS[ev.unitType]?.name ?? ev.unitType);
+        return ev.from === s.currentPlayer ? T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
       case 'cityCaptured':
-        return T.cityCapturedMsg(ev.name);
+        return ev.by === s.currentPlayer || hasMet(s, s.currentPlayer, ev.by) ? T.cityCapturedMsg(ev.name) : null;
       case 'campCleared':
         return ev.by === s.currentPlayer ? T.campCleared(ev.gold) : null;
       case 'unitLost':
@@ -282,6 +361,7 @@ export class App {
       case 'firstContact': {
         const me = s.currentPlayer;
         if (ev.a !== me && ev.b !== me) return null;
+        this.tip('contact');
         return T.firstContact(playerName(s, ev.a === me ? ev.b : ev.a));
       }
       case 'warDeclared':
@@ -305,7 +385,7 @@ export class App {
           ? T.suzerainMsg(playerName(s, ev.cityState), ev.suzerain === null ? null : playerName(s, ev.suzerain))
           : null;
       case 'eliminated':
-        return T.eliminatedMsg(playerName(s, ev.player));
+        return hasMet(s, s.currentPlayer, ev.player) ? T.eliminatedMsg(playerName(s, ev.player)) : null;
       case 'envoyGained':
         return ev.player === s.currentPlayer ? T.envoyGained : null;
       case 'disbanded':
@@ -326,9 +406,14 @@ export class App {
         const def = GREAT_PERSON_TYPES[ev.gpType];
         return ev.player === s.currentPlayer ? T.gpRecruited(ev.name, def.name) : hasMet(s, s.currentPlayer, ev.player) ? T.gpOther(playerName(s, ev.player), ev.name) : null;
       }
+      case 'eraChanged':
+        return ev.player === s.currentPlayer ? T.eraMsg(ev.era) : null;
+      case 'victory':
+        return null;
       case 'techDone':
         return ev.playerId === s.currentPlayer ? T.techDone(TECH_BY_ID[ev.id]?.name ?? ev.id) : null;
       case 'civicDone':
+        if (ev.playerId === s.currentPlayer && s.players[s.currentPlayer].government) this.tip('policies');
         return ev.playerId === s.currentPlayer ? `${T.civicDone(CIVIC_BY_ID[ev.id]?.name ?? ev.id)} ${T.policyWindow}` : null;
       case 'boost':
         return ev.playerId === s.currentPlayer
@@ -437,6 +522,7 @@ export class App {
     const u = this.selectedUnit();
     if (u) {
       const t = attackTargets(s, u);
+      if (t.length) this.tip('combat');
       return t.length ? new Set(t) : undefined;
     }
     const c = this.selectedCity();
@@ -496,6 +582,7 @@ export class App {
   private selectCity(id: number | undefined, center = false): void {
     this.pendingAttack = undefined;
     this.selectedCityId = id;
+    if (id !== undefined) this.tip('city');
     this.pendingBuyTile = undefined;
     if (id !== undefined) {
       this.selectedUnitId = undefined;
@@ -509,13 +596,22 @@ export class App {
     this.invalidate();
   }
 
-  private startNewGame(seed: string, mapSize: GameState['settings']['mapSize'], civId: string, rivals?: number, cityStates?: number): void {
-    const s = newGame({ seed, mapSize, civId, rivals, cityStates });
+  private startNewGame(
+    seed: string,
+    mapSize: GameState['settings']['mapSize'],
+    civId: string,
+    rivals?: number,
+    cityStates?: number,
+    turnLimit?: number,
+  ): void {
+    const s = newGame({ seed, mapSize, civId, rivals, cityStates, turnLimit });
     this.selectedUnitId = undefined;
     this.selectedTile = undefined;
     this.pendingPath = undefined;
     this.setState(s);
     this.cam.zoom = 1.1;
+    this.victoryShown = false;
+    this.tip('welcome');
     const first = s.units.find((u) => u.owner === s.currentPlayer && u.type === 'settler') ?? s.units[0];
     if (first) this.selectUnit(first.id, true);
     this.autosave();
@@ -584,12 +680,14 @@ export class App {
     if (!this.state) return;
     const needProd = citiesNeedingProduction(this.state, this.state.currentPlayer);
     if (needProd.length) {
+      this.tip('production');
       this.selectCity(needProd[0].id, true);
       this.showProduction();
       return;
     }
     const choice = needsResearchChoice(this.state.players[this.state.currentPlayer]);
     if (choice && this.state.cities.some((c) => c.owner === this.state!.currentPlayer)) {
+      this.tip('research');
       this.showTree(choice);
       return;
     }
@@ -617,6 +715,12 @@ export class App {
     if (!this.selectNextUnit()) this.selectUnit(undefined);
     const me = this.state.players[this.state.currentPlayer];
     if (me.eliminated) return this.showGameOver();
+    const w = this.state.winner;
+    if (w && !this.victoryShown) {
+      this.victoryShown = true;
+      return this.showVictory();
+    }
+    if (this.state.turn >= 8) this.tip('victory');
     if (this.state.proposals.some((p) => p.to === me.id)) this.showProposals();
   }
 
@@ -711,6 +815,7 @@ export class App {
     if (sel && idx !== sel.pos && s.players[me].explored[idx]) {
       const res = findPath(s, sel, idx);
       if (res) {
+        this.tip('move');
         this.pendingPath = { target: idx, path: res.path, turns: res.turns };
         this.selectedTile = idx;
         this.renderHud();
@@ -731,7 +836,11 @@ export class App {
   }
 
   private onKey(e: KeyboardEvent): void {
-    if (!this.state || !this.el.modal.hidden) return;
+    if (!this.el.modal.hidden) {
+      if (e.key === 'Escape' && this.el.modal.dataset.closable === '1') closeModal(this.modalHost());
+      return;
+    }
+    if (!this.state) return;
     if (e.target instanceof HTMLInputElement) return;
     if (e.key === 'Enter') this.onEndTurnButton();
     else if (e.key === '+' || e.key === '=') this.zoomBy(1.25);
@@ -801,7 +910,12 @@ export class App {
         h('span', { class: 'civ-name' }, civ?.name ?? ''),
       ),
       this.resourceBar(s),
-      h('div', { class: 'turn-info' }, h('strong', {}, `${T.turn} ${s.turn}`), h('small', {}, turnYear(s.turn))),
+      h(
+        'button',
+        { class: 'turn-info', 'aria-label': T.scoreboard, onclick: () => this.showScore() },
+        h('strong', {}, `${T.turn} ${s.turn}`),
+        h('small', {}, turnYear(s.turn)),
+      ),
       h('button', { class: 'btn icon', 'aria-label': T.diplomacy, onclick: () => this.showDiplomacy() }, '🤝'),
       h('button', { class: 'btn icon', 'aria-label': T.menu, onclick: () => this.showGameMenu() }, '☰'),
     );
@@ -1575,6 +1689,134 @@ export class App {
     openModal(this.modalHost(), T.economy, body);
   }
 
+  /** Mostra uma dica do tutorial (uma vez por aparelho). */
+  private tip(id: string): void {
+    const t = TIPS[id];
+    if (!t || !this.prefs.tips || this.prefs.seenTips.includes(id) || !this.el.tip.hidden) return;
+    this.prefs.seenTips.push(id);
+    savePrefs(this.prefs);
+    clear(this.el.tip);
+    this.el.tip.append(
+      h('strong', {}, `💡 ${t.title}`),
+      h('p', {}, t.text),
+      h(
+        'div',
+        { class: 'actions' },
+        h('button', { class: 'btn primary', onclick: () => (this.el.tip.hidden = true) }, T.gotIt),
+        h(
+          'button',
+          {
+            class: 'btn',
+            onclick: () => {
+              this.prefs.tips = false;
+              savePrefs(this.prefs);
+              this.el.tip.hidden = true;
+            },
+          },
+          T.disableTips,
+        ),
+      ),
+    );
+    this.el.tip.hidden = false;
+  }
+
+  private showVictory(): void {
+    const s = this.state!;
+    const w = s.winner!;
+    const mine = w.player === s.currentPlayer;
+    const host = this.modalHost();
+    play(mine ? 'victory' : 'error');
+    openModal(
+      host,
+      mine ? T.victoryTitle : T.defeat,
+      h(
+        'div',
+        { class: 'menu-list' },
+        h('p', {}, mine ? T.victoryText(VICTORY_LABELS[w.type]) : T.lostText(playerName(s, w.player), VICTORY_LABELS[w.type])),
+        h('p', { class: 'muted' }, T.finalScore(scoreOf(s, s.currentPlayer).total)),
+        h('button', { class: 'btn primary wide', onclick: () => closeModal(host) }, '▶ ' + T.keepPlaying),
+        h('button', { class: 'btn wide', onclick: () => this.showScore() }, '🏆 ' + T.scoreboard),
+        h('button', { class: 'btn wide', onclick: () => this.showNewGame(true) }, '✦ ' + T.newGame),
+      ),
+      { closable: false },
+    );
+  }
+
+  private showScore(): void {
+    const s = this.state;
+    if (!s) return;
+    const me = s.currentPlayer;
+    const known = s.players.filter((p) => !p.isBarbarian && !p.isCityState && (p.id === me || hasMet(s, me, p.id)));
+    const unknownCount = s.players.filter((p) => !p.isBarbarian && !p.isCityState && p.id !== me && !hasMet(s, me, p.id)).length;
+    const row = (pid: number) => {
+      const civ = CIV_BY_ID[s.players[pid].civId];
+      const sc = scoreOf(s, pid);
+      const dom = dominationProgress(s, pid);
+      const sci = scienceProgress(s, pid);
+      const cul = cultureProgress(s, pid);
+      const rel = religionProgress(s, pid);
+      return h(
+        'div',
+        { class: 'dip-card', style: `--civ:${civ?.color};--civ2:${civ?.secondaryColor}` },
+        h(
+          'div',
+          { class: 'dip-head' },
+          h('span', { class: 'civ-swatch' }),
+          h('div', {}, h('strong', {}, `${civ?.name}${pid === me ? ` (${T.you})` : ''}`), h('small', {}, `${playerEra(s, pid).name} · ${T.points}: ${sc.total}`)),
+        ),
+        h('small', {}, `⚔ ${VICTORY_LABELS.domination}: ${dom.held}/${dom.total} ${T.capitals}`),
+        h('small', {}, `🔬 ${VICTORY_LABELS.science}: ${sci.techs}/${sci.totalTechs} ${T.techsWord} → ${T.starProject}`),
+        h('small', {}, `🎭 ${VICTORY_LABELS.culture}: ${cul.civics}/${cul.totalCivics} ${T.civicsWord} · ${cul.culture} (${T.rivalBest} ${cul.bestRival})`),
+        h('small', {}, `✨ ${VICTORY_LABELS.religion}: ${rel.majority}/${rel.total} ${T.civsWord}`),
+      );
+    };
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, T.victoryHelp(s.settings.turnLimit ?? 250)),
+      s.winner ? h('p', { class: 'hint' }, T.winnerLine(playerName(s, s.winner.player), VICTORY_LABELS[s.winner.type], s.winner.turn)) : null,
+      ...known.sort((a, b) => scoreOf(s, b.id).total - scoreOf(s, a.id).total).map((p) => row(p.id)),
+      unknownCount ? h('small', { class: 'muted' }, T.unknownCivs(unknownCount)) : null,
+    );
+    openModal(this.modalHost(), T.scoreboard, body);
+  }
+
+  private showSettings(): void {
+    const host = this.modalHost();
+    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText') =>
+      h(
+        'button',
+        {
+          class: `btn wide toggle${this.prefs[key] ? ' on' : ''}`,
+          'aria-pressed': String(this.prefs[key]),
+          onclick: () => {
+            this.prefs[key] = !this.prefs[key];
+            if (key === 'tips' && this.prefs.tips) this.prefs.seenTips = [];
+            savePrefs(this.prefs);
+            applyPrefs(this.prefs);
+            setSoundEnabled(this.prefs.sound);
+            this.showSettings();
+            this.renderer.resize();
+            this.invalidate();
+          },
+        },
+        `${this.prefs[key] ? '✔' : '✕'} ${label}`,
+      );
+    openModal(
+      host,
+      T.settings,
+      h(
+        'div',
+        { class: 'menu-list' },
+        toggle(T.prefSound, 'sound'),
+        toggle(T.prefTips, 'tips'),
+        toggle(T.prefAnimations, 'animations'),
+        toggle(T.prefLargeText, 'largeText'),
+        h('small', { class: 'muted' }, T.keyboardHelp),
+      ),
+    );
+  }
+
   private showPromotions(u: Unit): void {
     const host = this.modalHost();
     const body = h(
@@ -1799,6 +2041,8 @@ export class App {
       h('button', { class: 'btn wide', onclick: () => this.showEconomy() }, '🪙 ' + T.economy),
       h('button', { class: 'btn wide', onclick: () => this.showReligion() }, '✨ ' + T.religionTitle),
       h('button', { class: 'btn wide', onclick: () => this.showGreatPeople() }, '✦ ' + T.greatPeople),
+      h('button', { class: 'btn wide', onclick: () => this.showScore() }, '🏆 ' + T.scoreboard),
+      h('button', { class: 'btn wide', onclick: () => this.showSettings() }, '⚙ ' + T.settings),
       h('button', { class: 'btn wide', onclick: () => this.showSave() }, '💾 ' + T.save),
       h('button', { class: 'btn wide', onclick: () => this.showLoad(true) }, '📂 ' + T.load),
       h('button', { class: 'btn wide', onclick: () => this.showNewGame(true) }, '✦ ' + T.newGame),
@@ -1824,7 +2068,7 @@ export class App {
     const form = newGameForm((c) => {
       if (closable && this.state && !confirm(T.confirmNewGame)) return;
       closeModal(host);
-      this.startNewGame(c.seed, c.mapSize, c.civId, c.rivals, c.cityStates);
+      this.startNewGame(c.seed, c.mapSize, c.civId, c.rivals, c.cityStates, c.turnLimit);
     }, this.state ? { mapSize: this.state.settings.mapSize, civId: this.state.players[0].civId } : undefined);
     if (!closable) {
       form.prepend(h('button', { class: 'btn', onclick: () => this.showMainMenu(!!readSlotInfo(AUTOSAVE_SLOT)) }, '← Voltar'));
@@ -1867,6 +2111,7 @@ export class App {
       this.pendingPath = undefined;
       this.selectedCityId = undefined;
       this.setState(normalizeState(s));
+      this.victoryShown = !!s.winner;
       if (!this.selectNextUnit()) this.centerOnSelection();
       this.toast(T.loaded);
       if (this.state?.proposals.some((p) => p.to === this.state!.currentPlayer)) this.showProposals();

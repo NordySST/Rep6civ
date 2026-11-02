@@ -152,11 +152,15 @@ export function chooseProduction(state: GameState, city: City): ProductionItem |
   const can = (item: ProductionItem) => !cannotProduce(state, city, item);
   const building = (b: string): ProductionItem => ({ kind: 'building', id: b });
 
+  // projeto de vitória científica tem prioridade máxima
+  const star: ProductionItem = { kind: 'project', id: 'star-expedition' };
+  if (!p.isCityState && can(star)) return star;
+  const festival: ProductionItem = { kind: 'project', id: 'festival' };
   if (p.isCityState) {
     if (military < 2 || (atWarNow && military < 4)) return bestMilitary(state, city);
     for (const b of ['walls', 'monument', 'granary', 'library', 'market', 'shrine', 'workshop', 'watermill', 'lighthouse'])
       if (can(building(b))) return building(b);
-    return military < 6 ? bestMilitary(state, city) : null;
+    return military < 6 ? bestMilitary(state, city) : festival;
   }
 
   if (military < myCities || (atWarNow && military < myCities * 2 + 1)) {
@@ -193,7 +197,8 @@ export function chooseProduction(state: GameState, city: City): ProductionItem |
   }
   const wonder = pickWonder(state, city);
   if (wonder) return wonder;
-  return bestMilitary(state, city) ?? (can(settlerItem) ? settlerItem : null);
+  if (military >= myCities * 2) return festival;
+  return bestMilitary(state, city) ?? festival;
 }
 
 export function aiCities(state: GameState, id: number, events: GameEvent[]): void {
