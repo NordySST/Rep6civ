@@ -49,7 +49,12 @@ src/
            diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
            suseranos, território fechado, eliminação),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
-  render/  Canvas 2D: camera.ts (transformações/zoom) e renderer.ts (arte procedural).
+  render/  Canvas 2D: camera.ts (transformações/zoom), renderer.ts (arte procedural) e
+           view.ts (interface `MapView` comum às visões 2D e 3D).
+  render3d/ Visão 3D (three.js, carregada sob demanda): terrain.ts (relevo contínuo e cores a
+           partir dos hexágonos), materials.ts (névoa e camada do chão nos shaders),
+           world.ts (malhas: terreno em blocos, água, rios, árvores, cidades) e
+           renderer3d.ts (câmera inclinada, toque por raio, figuras em pé).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
@@ -395,6 +400,30 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   instantâneos; arrastar/pinçar cancela). Unidade selecionada pulsa (~20 quadros/s). Faixa
   "Turno N · ano" no início de cada turno. Tudo respeita a preferência Animações (desligada
   por padrão com `prefers-reduced-motion`).
+
+### Visão 3D — Lote 3D-1
+
+- Preferência **Mapa em 3D** (Configurações; padrão ligado). `App.applyViewPref` importa
+  `render3d/` sob demanda (pedaço próprio de ~600 kB); sem WebGL2 volta ao 2D com aviso. O
+  canvas WebGL (`.map-gl`) fica sob o `#map`, que recebe os toques e desenha as figuras.
+- Mesma câmera lógica (`x`, `y`, `zoom` = pixels por unidade no centro); a câmera 3D fica ao
+  sul, inclinada (48° de perto a 64° de longe). `MapView.pick` (raio até o relevo) substitui
+  `screenToWorld` nos toques; `panScale` corrige o arrasto vertical.
+- `TerrainField`: altura e cor por ponto misturando o hexágono e os vizinhos (litorais e
+  encostas suaves), colinas, cordilheiras com picos nevados, leito dos rios e ruído
+  periódico na volta leste-oeste. Água translúcida em `WATER_LEVEL`, rios como fitas,
+  florestas/selvas e cidades (casas que crescem com a população, palácio com cúpula na
+  capital, muralhas) em `InstancedMesh`. Tudo é refeito só quando a assinatura muda.
+- Névoa por hexágono no shader (`uFogTex`): inexplorado fica plano e escuro (não revela
+  relevo), objetos afundam; explorado e não visível, escurecido.
+- Camada do chão (`Renderer.drawDecal`): estradas, melhorias, alcance, alvos, fronteiras,
+  visão da cidade, caminho e seleção são desenhados pelo 2D num canvas projetado no terreno
+  (região que acompanha a câmera; só redesenha quando muda). Figuras em pé
+  (`Renderer.drawSprites`): ícones de recursos, distritos, maravilhas, acampamentos,
+  estandartes, unidades e efeitos, com a arte 2D posicionada nos pontos projetados.
+- `window.__rep6civ` ganhou `view()` e `tileToScreen(idx)` (testes automatizados).
+- Próximos: **3D-2** unidades em miniatura 3D, melhorias, distritos e maravilhas em 3D,
+  animações no relevo; **3D-3** sombras, água animada, nuvens na névoa, desempenho.
 
 ## Plano das 8 etapas
 

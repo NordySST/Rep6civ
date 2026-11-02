@@ -4,6 +4,8 @@ export interface Prefs {
   tips: boolean;
   animations: boolean;
   largeText: boolean;
+  /** Mapa em 3D (WebGL); sem suporte, o jogo usa o 2D. */
+  view3d: boolean;
   seenTips: string[];
 }
 
@@ -18,7 +20,7 @@ function reducedMotion(): boolean {
 }
 
 export function loadPrefs(): Prefs {
-  const def: Prefs = { sound: true, tips: true, animations: !reducedMotion(), largeText: false, seenTips: [] };
+  const def: Prefs = { sound: true, tips: true, animations: !reducedMotion(), largeText: false, view3d: true, seenTips: [] };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return { ...def, ...JSON.parse(raw) };

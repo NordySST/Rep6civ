@@ -6,6 +6,7 @@ import { WONDER_BY_ID } from '../data/wonders';
 import { YIELD_KEYS, YIELD_LABELS } from '../data/yields';
 import { clampCamera, clampZoom, type Camera, zoomAt } from '../render/camera';
 import { nearCenter, Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
+import type { MapView } from '../render/view';
 import { activeHumans, applyAction, nextHuman, unitsNeedingOrders, type Action, type ActionResult } from '../rules/actions';
 import { playEndTurn, proposeDeal } from '../ai';
 import { unitStrength } from '../ai/common';
@@ -109,7 +110,6 @@ import { CIVICS, CIVIC_BY_ID } from '../data/civics';
 import { GOVERNMENTS, GOVERNMENT_BY_ID, POLICY_BY_ID, SLOT_LABELS } from '../data/governments';
 import type { ImprovementId } from '../data/improvements';
 import { computeVisibility } from '../rules/visibility';
-import { screenToWorld } from '../render/camera';
 import { AUTOSAVE_SLOT, loadFromSlot, readSlotInfo, saveToSlot, SaveError } from '../state/save';
 import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/types';
 import { clear, h } from './dom';
@@ -128,6 +128,9 @@ export class App {
   private state: GameState | null = null;
   private cam: Camera = { x: 0, y: 0, zoom: 1 };
   private renderer: Renderer;
+  /** Visão ativa do mapa: o próprio `renderer` (2D) ou a 3D carregada sob demanda. */
+  private view: MapView;
+  private glCanvas?: HTMLCanvasElement;
   private vis: Uint8Array = new Uint8Array(0);
   private selectedUnitId: number | undefined;
   private selectedTile: number | undefined;
@@ -175,6 +178,7 @@ export class App {
     });
     root.append(this.el.canvas, this.el.banner, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal, this.el.tip);
     this.renderer = new Renderer(this.el.canvas);
+    this.view = this.renderer;
 
     this.el.zoom.append(
       h('button', { class: 'btn icon', 'aria-label': T.zoomIn, onclick: () => this.zoomBy(1.25) }, '+'),
@@ -186,12 +190,13 @@ export class App {
     attachInput(this.el.canvas, {
       onPan: (dx, dy) => {
         this.camTween = undefined;
-        this.cam = this.clampCam({ ...this.cam, x: this.cam.x - dx / this.cam.zoom, y: this.cam.y - dy / this.cam.zoom });
+        const k = this.view.panScale(this.cam);
+        this.cam = this.clampCam({ ...this.cam, x: this.cam.x - dx * k.x, y: this.cam.y - dy * k.y });
         this.invalidate();
       },
       onZoom: (f, sx, sy) => {
         this.camTween = undefined;
-        this.cam = this.clampCam(zoomAt(this.cam, this.renderer.vw, this.renderer.vh, sx, sy, this.cam.zoom * f));
+        this.cam = this.clampCam(zoomAt(this.cam, this.view.vw, this.view.vh, sx, sy, this.cam.zoom * f));
         this.invalidate();
       },
       onTap: (sx, sy) => this.onTap(sx, sy),
@@ -201,9 +206,15 @@ export class App {
     window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 200));
     window.addEventListener('keydown', (e) => this.onKey(e));
     this.resize();
+    void this.applyViewPref();
     this.loop();
     // gancho de depuração/testes automatizados (somente leitura)
-    (window as unknown as { __rep6civ?: unknown }).__rep6civ = { camera: () => ({ ...this.cam }), turn: () => this.state?.turn };
+    (window as unknown as { __rep6civ?: unknown }).__rep6civ = {
+      camera: () => ({ ...this.cam }),
+      turn: () => this.state?.turn,
+      view: () => this.view.kind,
+      tileToScreen: (idx: number) => (this.state ? this.view.tileToScreen(this.state, this.cam, idx) : null),
+    };
   }
 
   // ------------------------------------------------------------------ ciclo
@@ -252,17 +263,51 @@ export class App {
         bursts,
         pulse: pulsing ? (now % 1400) / 1400 : undefined,
       };
-      this.renderer.draw(this.state, this.cam, this.vis, overlay);
+      this.view.draw(this.state, this.cam, this.vis, overlay);
     }
     requestAnimationFrame(this.loop);
   };
+
+  /** Liga/desliga o mapa 3D conforme a preferência (o módulo 3D só é baixado quando usado). */
+  private async applyViewPref(): Promise<void> {
+    const want3d = this.prefs.view3d;
+    if (want3d === (this.view.kind === '3d')) return;
+    if (!want3d) {
+      this.view.dispose?.();
+      this.glCanvas?.remove();
+      this.glCanvas = undefined;
+      this.view = this.renderer;
+      document.body.classList.remove('map-3d');
+      this.resize();
+      return;
+    }
+    try {
+      const mod = await import('../render3d/renderer3d');
+      if (!this.prefs.view3d || this.view.kind === '3d') return;
+      if (!mod.webglAvailable()) throw new Error('sem WebGL2');
+      const gl = h('canvas', { class: 'map-gl', 'aria-hidden': 'true' }) as HTMLCanvasElement;
+      this.el.canvas.before(gl);
+      this.glCanvas = gl;
+      this.view = new mod.Renderer3D(gl, this.renderer, (c) => new Renderer(c));
+      document.body.classList.add('map-3d');
+      this.resize();
+    } catch (e) {
+      console.warn('3D indisponível', e);
+      this.glCanvas?.remove();
+      this.glCanvas = undefined;
+      this.view = this.renderer;
+      this.prefs.view3d = false;
+      savePrefs(this.prefs);
+      this.toast(T.view3dUnavailable);
+    }
+  }
 
   private invalidate(): void {
     this.dirty = true;
   }
 
   private resize(): void {
-    this.renderer.resize();
+    this.view.resize();
     if (this.state) this.cam = this.clampCam(this.cam);
     this.invalidate();
   }
@@ -978,7 +1023,7 @@ export class App {
 
   private onTap(sx: number, sy: number): void {
     if (!this.state) return;
-    const w = screenToWorld(this.cam, this.renderer.vw, this.renderer.vh, sx, sy);
+    const w = this.view.pick(this.cam, sx, sy);
     const idx = tileAtWorld(this.state, w.x, w.y);
     if (idx < 0) return;
     const s = this.state;
@@ -1106,7 +1151,7 @@ export class App {
 
   private zoomBy(f: number): void {
     const base = this.camTween?.to ?? this.cam;
-    this.moveCamera(this.clampCam(zoomAt(base, this.renderer.vw, this.renderer.vh, this.renderer.vw / 2, this.renderer.vh / 2, base.zoom * f)), 220);
+    this.moveCamera(this.clampCam(zoomAt(base, this.view.vw, this.view.vh, this.view.vw / 2, this.view.vh / 2, base.zoom * f)), 220);
   }
 
   private centerOn(idx: number): void {
@@ -1127,7 +1172,7 @@ export class App {
   private moveCamera(to: Camera, dur: number): void {
     const from = this.cam;
     const target = { ...to, x: from.x + this.wrapDx(to.x - from.x) };
-    const far = Math.hypot(target.x - from.x, target.y - from.y) * from.zoom > Math.max(this.renderer.vw, this.renderer.vh) * 2.5;
+    const far = Math.hypot(target.x - from.x, target.y - from.y) * from.zoom > Math.max(this.view.vw, this.view.vh) * 2.5;
     if (!this.prefs.animations || far) {
       this.camTween = undefined;
       this.cam = this.clampCam(target);
@@ -2194,7 +2239,7 @@ export class App {
 
   private showSettings(): void {
     const host = this.modalHost();
-    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText') =>
+    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText' | 'view3d') =>
       h(
         'button',
         {
@@ -2207,7 +2252,8 @@ export class App {
             applyPrefs(this.prefs);
             setSoundEnabled(this.prefs.sound);
             this.showSettings();
-            this.renderer.resize();
+            if (key === 'view3d') void this.applyViewPref();
+            this.view.resize();
             this.invalidate();
           },
         },
@@ -2223,6 +2269,8 @@ export class App {
         toggle(T.prefTips, 'tips'),
         toggle(T.prefAnimations, 'animations'),
         toggle(T.prefLargeText, 'largeText'),
+        toggle(T.prefView3d, 'view3d'),
+        h('small', { class: 'muted' }, T.view3dHint),
         h('small', { class: 'muted' }, T.keyboardHelp),
       ),
     );
