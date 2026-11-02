@@ -64,6 +64,22 @@ export const GOVERNMENTS: GovernmentDef[] = [
     effects: [{ type: 'yieldPercent', yields: { gold: 10, culture: 10 } }],
     description: '+10% de ouro e cultura.',
   },
+  {
+    id: 'democracy',
+    name: 'Democracia',
+    civic: 'ideology',
+    slots: { military: 1, economic: 3, wildcard: 2 },
+    effects: [{ type: 'yieldPercent', yields: { gold: 15, culture: 10 } }, { type: 'amenities', amount: 1 }],
+    description: '+15% de ouro, +10% de cultura e +1 de comodidade.',
+  },
+  {
+    id: 'technocracy',
+    name: 'Tecnocracia',
+    civic: 'ideology',
+    slots: { military: 2, economic: 2, wildcard: 2 },
+    effects: [{ type: 'yieldPercent', yields: { science: 15, production: 5 } }],
+    description: '+15% de ciência e +5% de produção.',
+  },
 ];
 
 export interface PolicyDef {
@@ -182,6 +198,38 @@ export const POLICIES: PolicyDef[] = [
     civic: 'political-philosophy',
     effects: [{ type: 'yieldPercent', yields: { science: 15 } }],
     description: '+15% de ciência.',
+  },
+  {
+    id: 'grand-tour',
+    name: 'Grande Viagem',
+    slot: 'economic',
+    civic: 'humanism',
+    effects: [{ type: 'yieldPercent', yields: { culture: 20 } }],
+    description: '+20% de cultura.',
+  },
+  {
+    id: 'colonial-offices',
+    name: 'Escritórios Coloniais',
+    slot: 'economic',
+    civic: 'mercantilism',
+    effects: [{ type: 'tradeRouteGold', amount: 3 }, { type: 'growthPercent', percent: 10 }],
+    description: '+3 de ouro por rota comercial e +10% de crescimento.',
+  },
+  {
+    id: 'conscription',
+    name: 'Conscrição',
+    slot: 'military',
+    civic: 'nationalism',
+    effects: [{ type: 'productionPercent', target: 'military', percent: 40 }],
+    description: '+40% de produção militar.',
+  },
+  {
+    id: 'five-year-plan',
+    name: 'Plano Quinquenal',
+    slot: 'economic',
+    civic: 'nationalism',
+    effects: [{ type: 'productionPercent', target: 'building', percent: 30 }],
+    description: '+30% de produção de edifícios.',
   },
 ];
 

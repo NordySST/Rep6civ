@@ -251,7 +251,7 @@ export const T = {
   rivalBest: 'melhor rival',
   civsWord: 'civilizações com maioria',
   victoryHelp: (limit: number) =>
-    `Vitórias: Dominação (todas as capitais originais), Científica (todas as tecnologias + Expedição Celeste), Cultural (todas as cívicas e 2× a cultura de cada rival, mín. 1000), Religiosa (sua religião na maioria das cidades de cada civilização) ou maior Pontuação no turno ${limit}.`,
+    `Vitórias: Dominação (todas as capitais originais), Científica (todas as tecnologias + Expedição Celeste), Cultural (todas as cívicas e 1,5× a cultura de cada rival, mín. 3000), Religiosa (sua religião na maioria das cidades de cada civilização e do mundo) ou maior Pontuação no turno ${limit}.`,
   winnerLine: (who: string, type: string, turn: number) => `🏆 ${who} venceu (${type}) no turno ${turn}.`,
   unknownCivs: (n: number) => `+${n} civilização(ões) ainda não encontrada(s).`,
   settings: 'Configurações',

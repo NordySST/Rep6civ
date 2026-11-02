@@ -90,6 +90,38 @@ export const CIVICS: CivicDef[] = [
     description: 'Políticas culturais.',
     boost: { description: 'Construa 2 Monumentos.', condition: { type: 'buildings', building: 'monument', count: 2 } },
   },
+  {
+    id: 'humanism',
+    name: 'Humanismo',
+    cost: 260,
+    prereqs: ['drama-poetry', 'political-philosophy'],
+    description: 'Políticas culturais do Renascimento.',
+    boost: { description: 'Construa 2 Anfiteatros.', condition: { type: 'buildings', building: 'amphitheater', count: 2 } },
+  },
+  {
+    id: 'mercantilism',
+    name: 'Mercantilismo',
+    cost: 320,
+    prereqs: ['humanism'],
+    description: 'Políticas comerciais.',
+    boost: { description: 'Acumule 500 de ouro.', condition: { type: 'gold', count: 500 } },
+  },
+  {
+    id: 'nationalism',
+    name: 'Nacionalismo',
+    cost: 480,
+    prereqs: ['mercantilism'],
+    description: 'Políticas militares e industriais.',
+    boost: { description: 'Tenha 8 cidades.', condition: { type: 'cities', count: 8 } },
+  },
+  {
+    id: 'ideology',
+    name: 'Ideologia',
+    cost: 700,
+    prereqs: ['nationalism'],
+    description: 'Libera Democracia e Tecnocracia.',
+    boost: { description: 'Conclua 13 cívicas.', condition: { type: 'civics', count: 13 } },
+  },
 ];
 
 export const CIVIC_BY_ID: Record<string, CivicDef> = Object.fromEntries(CIVICS.map((c) => [c.id, c]));

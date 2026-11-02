@@ -12,7 +12,8 @@ import { distance } from './hex';
 
 export const PRESSURE_RANGE = 10;
 export const MISSIONARY_PRESSURE = 100;
-export const CONVERT_MIN = 20;
+export const CONVERT_MIN = 40;
+export const PRESSURE_DECAY = 0.95;
 
 export type ReligionEvent =
   | { type: 'pantheon'; player: number; belief: string }
@@ -97,13 +98,21 @@ function updateReligion(city: City): string | null {
 /** Pressão religiosa do turno (muta): cidades seguidoras influenciam vizinhas. */
 export function spreadPressure(state: GameState): ReligionEvent[] {
   const events: ReligionEvent[] = [];
+  // a pressão decai 5% por turno: difundir exige proximidade contínua ou missionários
+  for (const c of state.cities) {
+    for (const r of Object.keys(c.pressure)) c.pressure[r] = Math.round(c.pressure[r] * PRESSURE_DECAY * 100) / 100;
+  }
   const sources = state.cities.filter((c) => c.religion);
   for (const target of state.cities) {
     for (const src of sources) {
       if (src.id === target.id) continue;
       if (distance(state.map, src.pos, target.pos) > PRESSURE_RANGE) continue;
       const holy = state.religions.some((r) => r.id === src.religion && r.holyCityId === src.id);
-      target.pressure[src.religion!] = (target.pressure[src.religion!] ?? 0) + (holy ? 3 : 1);
+      let p = holy ? 3 : 1;
+      // resistência: cidades de quem fundou outra religião recebem metade da pressão estrangeira
+      const ownerRel = religionOf(state, target.owner);
+      if (ownerRel && ownerRel.id !== src.religion) p /= 2;
+      target.pressure[src.religion!] = (target.pressure[src.religion!] ?? 0) + p;
     }
     const conv = updateReligion(target);
     if (conv) events.push({ type: 'cityConverted', cityId: target.id, religion: conv });

@@ -134,7 +134,7 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
 
 ### Ciência, cultura e governo (etapa 3)
 
-- Árvores em `data/techs.ts` (18 tecnologias, Antiga→Medieval) e `data/civics.ts` (10 cívicas).
+- Árvores em `data/techs.ts` (31 tecnologias, Antiga→Moderna) e `data/civics.ts` (14 cívicas).
   A ciência/cultura do turno vai para o estoque do jogador (`player.science/culture`) e flui
   inteira para o item atual; o excedente fica no estoque para o próximo. Sem item escolhido,
   o estoque acumula. O botão de turno pede "Escolher pesquisa/cívica" quando há cidade.
@@ -329,6 +329,30 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
 - UI: especialistas no painel da cidade; botão 📜 Negociar na Diplomacia (luxos dos dois
   lados, ouro, acordo de pesquisa).
 - Save v9 (migração 8→9: `luxuryDeals`, `researchAgreements`; `specialists` é opcional).
+
+### Pós-etapas — Lote C
+
+- Eras novas: Renascentista (≥ 260), Industrial (≥ 400) e Moderna (≥ 600). Árvore com 31
+  tecnologias (13 novas: Finanças, Imprensa, Cartografia, Pólvora, Industrialização,
+  Economia Política, Máquina a Vapor, Raiamento, Refino, Eletricidade, Combustão, Rádio,
+  Fissão Nuclear) e 14 cívicas (Humanismo, Mercantilismo, Nacionalismo, Ideologia).
+  Carvão (Industrialização), Petróleo (Refino), Alumínio (Rádio) e Urânio (Fissão Nuclear)
+  agora podem ser revelados.
+- Conteúdo: Mosqueteiro e Infantaria de Linha (Salitre), Tanque (Petróleo), Caravela,
+  Encouraçado (Carvão); Observatório e Laboratório de Pesquisa (Campus), Banco e Bolsa de
+  Valores (Centro Comercial), Fábrica e Usina (Zona Industrial); governos Democracia e
+  Tecnocracia; políticas Grande Viagem, Escritórios Coloniais, Conscrição, Plano
+  Quinquenal. Bárbaros evoluem para Mosqueteiros/Infantaria nos turnos 110/160.
+- 4 civilizações novas (total 9): República de Ilhavar (costa/oceano +1 ouro), Reino de
+  Kaluun (planície +1 produção), Império Tzeltani (colinas +1 comida), Liga de Oskari
+  (floresta +1 ciência). Mapa grande: 5 rivais por padrão.
+- Rebalanceamento das vitórias: Expedição Celeste custa 900 (exige as 31 tecnologias);
+  Cultural exige todas as cívicas, ≥ 3000 de cultura acumulada e ≥ 1,5× a de cada rival;
+  Religiosa exige maioria em cada civilização e > 50% de todas as cidades do mundo;
+  pressão religiosa decai 5%/turno, conversão a partir de 40 e cidades de quem fundou outra
+  religião recebem metade da pressão estrangeira. Simulações (mapa pequeno, IA em todas as
+  civilizações) terminam com vitórias religiosas, culturais e por pontuação entre os turnos
+  ~140 e 250; a IA completa a árvore perto do turno 250.
 
 ## Plano das 8 etapas
 

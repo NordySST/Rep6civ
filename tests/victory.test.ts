@@ -76,11 +76,11 @@ describe('vitórias', () => {
   it('cultural: todas as cívicas e o dobro da cultura dos rivais', () => {
     const { s } = setup();
     s.players[0].civics = CIVICS.map((c) => c.id);
-    s.players[0].lifetimeCulture = 1200;
-    s.players[2].lifetimeCulture = 700;
+    s.players[0].lifetimeCulture = 5000;
+    s.players[2].lifetimeCulture = 3400;
     expect(checkVictory(s)).toBeNull();
-    s.players[2].lifetimeCulture = 500;
-    expect(cultureProgress(s, 0).culture).toBe(1200);
+    s.players[2].lifetimeCulture = 3300;
+    expect(cultureProgress(s, 0).culture).toBe(5000);
     expect(checkVictory(s)).toMatchObject({ player: 0, type: 'culture' });
   });
 

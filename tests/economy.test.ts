@@ -145,8 +145,10 @@ describe('religião', () => {
     expect(holy.religion).toBe('aurorism');
     const sci = cityYields(state, holy).science;
     expect(sci).toBeGreaterThanOrEqual(2);
-    // cidade sagrada exerce +3 por turno: 7 turnos convertem (≥ 20)
-    for (let k = 0; k < 7; k++) spreadPressure(state);
+    // cidade sagrada exerce +3 por turno (com decaimento de 5%): ~22 turnos chegam a 40
+    for (let k = 0; k < 15; k++) spreadPressure(state);
+    expect(state.cities.find((c) => c.id === other.id)!.religion).toBeUndefined();
+    for (let k = 0; k < 15; k++) spreadPressure(state);
     expect(state.cities.find((c) => c.id === other.id)!.religion).toBe('aurorism');
   });
 
