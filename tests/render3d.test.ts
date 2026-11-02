@@ -49,3 +49,34 @@ describe('visão 3D (sem WebGL)', () => {
     expect(boat.team?.attributes.position.count).toBeGreaterThan(0);
   });
 });
+
+import { readFileSync } from 'node:fs';
+import { decodePack } from '../src/render3d/pack';
+
+describe('pacote de modelos importados (Quaternius, CC0)', () => {
+  const manifest = JSON.parse(readFileSync('public/models/pack.json', 'utf8'));
+  const bin = readFileSync('public/models/pack.bin');
+  const pack = decodePack(manifest, bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
+
+  it('decodifica todos os modelos com geometria', () => {
+    for (const name of ['townCenter2', 'houseC', 'temple', 'market', 'barracks', 'knight', 'horse', 'tank', 'pine', 'vikingBoat']) {
+      const m = pack.get(name);
+      expect(m, name).toBeDefined();
+      expect((m!.neutral?.attributes.position.count ?? 0) + (m!.team?.attributes.position.count ?? 0), name).toBeGreaterThan(0);
+    }
+  });
+
+  it('partes "Main" e a armadura viram cor da equipe; encaixes do cavaleiro existem', () => {
+    expect(pack.get('tank')!.team).not.toBeNull();
+    expect(pack.get('houseC')!.team).not.toBeNull();
+    expect(pack.get('knight')!.team).not.toBeNull();
+    expect(Object.keys(pack.get('knight')!.points)).toEqual(expect.arrayContaining(['Palm_R', 'Palm_L', 'Head']));
+  });
+
+  it('unidades usam os modelos do pacote quando disponível', () => {
+    const plain = unitModel('swordsman');
+    const rich = unitModel('swordsman', false, pack);
+    const n = (m: ReturnType<typeof unitModel>) => (m.neutral?.attributes.position.count ?? 0) + (m.team?.attributes.position.count ?? 0);
+    expect(n(rich)).toBeGreaterThan(n(plain));
+  });
+});

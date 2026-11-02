@@ -372,14 +372,14 @@ export class Renderer implements MapView {
 
   // ------------------------------------------------------------------ camadas reaproveitadas pela visão 3D
 
-  private drawImprovements(state: GameState, idxs: number[], onlyFlat = false): void {
+  private drawImprovements(state: GameState, idxs: number[], onlyFlat = false, farms3d = false): void {
     const { ctx } = this;
     for (const i of idxs) {
       const t = state.map.tiles[i];
       if (!t.improvement) continue;
       const c = tileCenter(state, i);
       // na visão 3D só a fazenda fica pintada no chão; as demais são modelos
-      if (!onlyFlat || t.improvement === 'farm') this.drawImprovement(t.improvement as ImprovementId, c);
+      if (!onlyFlat || (t.improvement === 'farm' && !farms3d)) this.drawImprovement(t.improvement as ImprovementId, c);
       if (t.pillaged) {
         ctx.strokeStyle = '#e74c3c';
         ctx.lineWidth = 3;
@@ -514,7 +514,7 @@ export class Renderer implements MapView {
    * que fica "pintado" no terreno: estradas, melhorias, alcance, alvos, fronteiras, visão da
    * cidade, caminho e seleção. Nos mapas com volta, desenha também as cópias vizinhas.
    */
-  drawDecal(state: GameState, vis: Uint8Array, overlay: Overlay, r: { x: number; y: number; w: number; h: number; scale: number }): void {
+  drawDecal(state: GameState, vis: Uint8Array, overlay: Overlay, r: { x: number; y: number; w: number; h: number; scale: number }, farms3d = false): void {
     const { ctx } = this;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -539,7 +539,7 @@ export class Renderer implements MapView {
         if (isKnown(i)) idxs.push(i);
       }
       this.drawRoads(state, idxs, isKnown);
-      this.drawImprovements(state, idxs, true);
+      this.drawImprovements(state, idxs, true, farms3d);
       this.drawSettle(state, overlay);
       this.drawReachable(state, overlay, isKnown);
       this.drawPlacement(state, overlay);

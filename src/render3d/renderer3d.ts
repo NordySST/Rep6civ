@@ -6,9 +6,10 @@ import { SQRT3 } from '../rules/hex';
 import type { GameState } from '../state/types';
 import { createSharedUniforms, depthMaterialFor, patchMaterial, type SharedUniforms } from './materials';
 import { TerrainField, WATER_LEVEL } from './terrain';
-import { buildCities, buildRivers, buildTerrain, buildTrees, buildWater, citySignature } from './world';
+import { buildCities, buildCitiesPack, buildRivers, buildTerrain, buildTrees, buildTreesPack, buildWater, citySignature } from './world';
+import { loadPack, type Pack } from './pack';
 import { unitModel, type Model } from './models';
-import { buildStructures, structureSignature } from './structures';
+import { buildStructures, buildStructuresPack, structureSignature } from './structures';
 import { CIV_BY_ID } from '../data/civs';
 import { TERRAINS } from '../data/terrains';
 import { UNITS } from '../data/units';
@@ -62,7 +63,7 @@ export class Renderer3D implements MapView {
     rivers?: THREE.Mesh | null;
     trees?: THREE.Group;
     cities?: THREE.Group;
-    structures?: THREE.Mesh | null;
+    structures?: THREE.Object3D | null;
   } = {};
   private structSig = '';
   /** Unidades em miniatura (uma cópia, na volta mais próxima da câmera). */
@@ -72,6 +73,9 @@ export class Renderer3D implements MapView {
   private teamMats = new Map<string, THREE.MeshLambertMaterial>();
   private unitMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   private selRing: THREE.Mesh;
+  private pack: Pack | null = null;
+  private disposed = false;
+  private worldTeamMats = new Map<string, THREE.Material>();
   private sun: THREE.DirectionalLight;
   private depthTerrain: THREE.MeshDepthMaterial;
   private depthSink: THREE.MeshDepthMaterial;
@@ -96,6 +100,7 @@ export class Renderer3D implements MapView {
     private sprites: Renderer,
     makePainter: (c: HTMLCanvasElement) => Renderer,
     readonly quality: Quality3D = 'high',
+    private onChange: () => void = () => {},
   ) {
     const high = quality === 'high';
     this.maxDecal = high ? 2048 : 1024;
@@ -141,6 +146,19 @@ export class Renderer3D implements MapView {
     }
     this.depthTerrain = depthMaterialFor(this.uniforms, 'terrain');
     this.depthSink = depthMaterialFor(this.uniforms, 'sink');
+    // modelos importados (Quaternius, CC0): ao chegarem, refaz cidades, árvores e unidades
+    void loadPack().then((pack) => {
+      if (!pack || this.disposed) return;
+      this.pack = pack;
+      this.models.clear();
+      for (const rec of this.unitObjs.values()) this.unitLayer.remove(rec.obj);
+      this.unitObjs.clear();
+      this.terrainSig = -1;
+      this.citySig = '';
+      this.structSig = '';
+      this.lastState = undefined;
+      this.onChange();
+    });
     this.scene.fog = new THREE.Fog(0x22303e, 4000, 9000);
     this.scene.add(this.world);
     this.scene.add(this.unitLayer);
@@ -162,7 +180,22 @@ export class Renderer3D implements MapView {
     this.camera.aspect = this.vw / Math.max(1, this.vh);
   }
 
+  /** Material da cor da equipe para cidades/construções (com névoa e sombra). */
+  private worldTeamMat = (owner: number): THREE.Material => {
+    const st = this.lastState;
+    const color = owner === -2 ? '#7a2b1b' : (owner >= 0 && st ? CIV_BY_ID[st.players[owner]?.civId]?.color : undefined) ?? '#8a8a8a';
+    let m = this.worldTeamMats.get(color);
+    if (!m) {
+      m = patchMaterial(new THREE.MeshLambertMaterial({ color: new THREE.Color(color), vertexColors: true, flatShading: true }), this.uniforms, 'sink', false);
+      m.userData.team = true;
+      this.worldTeamMats.set(color, m);
+    }
+    return m;
+  };
+
   dispose(): void {
+    this.disposed = true;
+    this.worldTeamMats.forEach((m) => m.dispose());
     this.world.traverse((o) => {
       const m = o as THREE.Mesh;
       m.geometry?.dispose();
@@ -282,24 +315,26 @@ export class Renderer3D implements MapView {
       this.parts.terrain = buildTerrain(this.field, this.mats.terrain, this.quality === 'high' ? 200000 : 110000);
       this.parts.water = buildWater(this.field, this.mats.water);
       this.parts.rivers = buildRivers(this.field, state, this.mats.river);
-      this.parts.trees = buildTrees(this.field, state, this.mats.trees);
+      this.parts.trees = this.trees(state);
       this.citySig = '';
       changed = true;
     }
     if (cities !== this.citySig) {
       this.citySig = cities;
       this.disposeGroup(this.parts.cities);
-      this.parts.cities = buildCities(this.field!, state, this.mats.city);
+      this.parts.cities = (this.pack && buildCitiesPack(this.field!, state, this.mats.trees, this.worldTeamMat, this.pack)) || buildCities(this.field!, state, this.mats.city);
       // árvores somem do centro de cidades novas
       this.disposeGroup(this.parts.trees);
-      this.parts.trees = buildTrees(this.field!, state, this.mats.trees);
+      this.parts.trees = this.trees(state);
       changed = true;
     }
     const ss = structureSignature(state);
     if (changed || ss !== this.structSig) {
       this.structSig = ss;
-      if (this.parts.structures) this.parts.structures.geometry.dispose();
-      this.parts.structures = buildStructures(this.field!, state, this.mats.trees);
+      this.disposeGroup(this.parts.structures);
+      this.parts.structures = this.pack
+        ? buildStructuresPack(this.field!, state, this.mats.trees, this.worldTeamMat, this.pack, this.quality === 'high')
+        : buildStructures(this.field!, state, this.mats.trees);
       changed = true;
     }
     if (!changed) return;
@@ -319,7 +354,7 @@ export class Renderer3D implements MapView {
       }
     }
     // a água transparente desenha depois do terreno; sombras respeitam a névoa
-    const casters = new Set<THREE.Material>([this.mats.trees, this.mats.city]);
+    const casters = new Set<THREE.Material>([this.mats.trees, this.mats.city, ...this.worldTeamMats.values()]);
     this.world.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
@@ -336,6 +371,10 @@ export class Renderer3D implements MapView {
         m.customDepthMaterial = this.depthSink;
       }
     });
+  }
+
+  private trees(state: GameState): THREE.Group {
+    return (this.pack && buildTreesPack(this.field!, state, this.mats.trees, this.pack)) || buildTrees(this.field!, state, this.mats.trees);
   }
 
   private disposeGroup(g?: THREE.Object3D | null): void {
@@ -443,7 +482,7 @@ export class Renderer3D implements MapView {
     if (!regionChanged && key === this.decalKey) return;
     this.decalKey = key;
     const reg = this.decalRegion!;
-    this.decalPainter.drawDecal(state, vis, overlay, reg);
+    this.decalPainter.drawDecal(state, vis, overlay, reg, !!this.pack && this.quality === 'high');
     this.decalTex.needsUpdate = true;
     this.uniforms.uDecalRect.value.set(reg.x, reg.y, reg.w, reg.h);
   }
@@ -486,7 +525,7 @@ export class Renderer3D implements MapView {
     const color = CIV_BY_ID[state.players[owner]?.civId]?.color ?? '#888888';
     let m = this.teamMats.get(color);
     if (!m) {
-      m = new THREE.MeshLambertMaterial({ color: new THREE.Color(color), flatShading: true });
+      m = new THREE.MeshLambertMaterial({ color: new THREE.Color(color), vertexColors: true, flatShading: true });
       this.teamMats.set(color, m);
     }
     return m;
@@ -496,7 +535,7 @@ export class Renderer3D implements MapView {
     const key = `${type}${embarked ? '@boat' : ''}`;
     let m = this.models.get(key);
     if (!m) {
-      m = unitModel(type, embarked);
+      m = unitModel(type, embarked, this.pack);
       this.models.set(key, m);
     }
     return m;

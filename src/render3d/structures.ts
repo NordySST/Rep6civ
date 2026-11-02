@@ -3,6 +3,8 @@ import { DISTRICTS, type DistrictId } from '../data/districts';
 import { HEX_SIZE, tileCenter } from '../render/renderer';
 import type { GameState } from '../state/types';
 import { Kit } from './models';
+import type { Pack } from './pack';
+import { meshesFromKits, type TeamMatFor } from './world';
 import { rnd, TerrainField, WATER_LEVEL } from './terrain';
 
 /**
@@ -19,7 +21,7 @@ const GOLD = '#e0b44a';
 export function structureSignature(state: GameState): string {
   const parts: string[] = [];
   state.map.tiles.forEach((t, i) => {
-    if (t.improvement || t.district || t.builtWonder) parts.push(`${i}:${t.improvement ?? ''}:${t.pillaged ? 1 : 0}:${t.district ?? ''}:${t.builtWonder ?? ''}`);
+    if (t.improvement || t.district || t.builtWonder) parts.push(`${i}:${t.improvement ?? ''}:${t.pillaged ? 1 : 0}:${t.district ?? ''}:${t.builtWonder ?? ''}:${t.owner ?? ''}`);
   });
   for (const c of state.camps) parts.push(`c${c.pos}`);
   return parts.join('|');
@@ -257,4 +259,112 @@ export function buildStructures(field: TerrainField, state: GameState, mat: THRE
   if (!m.neutral) return null;
   m.neutral.computeBoundingSphere();
   return new THREE.Mesh(m.neutral, mat);
+}
+
+// ------------------------------------------------------------------ com modelos importados (Quaternius)
+
+/** Como `buildStructures`, usando modelos do pacote quando houver; o resto é procedural. */
+export function buildStructuresPack(
+  field: TerrainField,
+  state: GameState,
+  vcMat: THREE.Material,
+  teamMat: TeamMatFor,
+  pack: Pack,
+  farms3d: boolean,
+): THREE.Group {
+  const kits = new Map<number, Kit>();
+  const kitFor = (owner: number | undefined) => {
+    const key = owner ?? -1;
+    let k = kits.get(key);
+    if (!k) kits.set(key, (k = new Kit()));
+    return k;
+  };
+  /** Coloca o modelo com o maior lado medindo `size`, apoiado no chão. */
+  const place = (k: Kit, name: string, x: number, z: number, size: number, ry = 0, y?: number) => {
+    const m = pack.get(name);
+    if (!m) return false;
+    const s = size / Math.max(m.max[0] - m.min[0], m.max[2] - m.min[2]);
+    k.push(x, y ?? field.height(x, z) - 0.4, z, ry, s);
+    k.model(m, -(m.min[0] + m.max[0]) / 2, -m.min[1], -(m.min[2] + m.max[2]) / 2);
+    k.pop();
+    return true;
+  };
+  state.map.tiles.forEach((t, i) => {
+    const c = tileCenter(state, i);
+    const water = t.terrain === 'ocean' || t.terrain === 'coast';
+    const k = kitFor(t.owner);
+    const rot = Math.round(rnd(i, 21) * 5) * (Math.PI / 3);
+    const proc = (fn: () => void, dx = 0, dz = 0, r = rot) => {
+      k.push(c.x + dx, water ? WATER_LEVEL : field.height(c.x + dx, c.y + dz) - 0.3, c.y + dz, r);
+      fn();
+      k.pop();
+    };
+    if (t.builtWonder) {
+      const shape = Math.floor(rnd(t.builtWonder.length * 131 + t.builtWonder.charCodeAt(0) * 7, 1) * 5);
+      if (shape === 0 || shape === 3) place(k, shape === 0 ? 'wonder1' : 'wonder2', c.x, c.y, 44, rot);
+      else proc(() => wonder(k, t.builtWonder!, i));
+    } else if (t.district) {
+      switch (t.district) {
+        case 'holy-site':
+          proc(() => k.cyl(S * 0.62, S * 0.66, 0.8, '#b8b0a0', 0, -0.4, 0, 6));
+          place(k, 'temple', c.x, c.y, 30, rot);
+          break;
+        case 'commercial':
+          place(k, 'market', c.x, c.y, 40, rot);
+          break;
+        case 'encampment':
+          place(k, 'barracks', c.x, c.y, 38, rot);
+          break;
+        case 'harbor':
+          place(k, 'port', c.x, c.y, 38, rot, WATER_LEVEL - 0.3);
+          break;
+        case 'industrial':
+          proc(() => k.cyl(S * 0.62, S * 0.66, 0.8, '#8d8478', 0, -0.4, 0, 6));
+          place(k, 'storage', c.x - 6, c.y + 4, 22, rot);
+          place(k, 'windmill', c.x + 10, c.y - 8, 18, rot + 0.6);
+          break;
+        case 'campus':
+          proc(() => district(k, 'campus', i, false));
+          place(k, 'watchTower', c.x - 12, c.y - 7, 8, 0);
+          break;
+        default:
+          proc(() => district(k, t.district!, i, water));
+      }
+    } else if (t.improvement) {
+      const dx = -4;
+      const dz = 3;
+      switch (t.improvement) {
+        case 'farm':
+          if (farms3d) place(k, 'farm', c.x, c.y + 2, 40, rot);
+          break;
+        case 'mine':
+          if (!place(k, 'mine', c.x + dx, c.y + dz, 26, rot)) proc(() => mine(k, i), dx, dz);
+          break;
+        case 'quarry':
+          place(k, 'rock', c.x + dx - 6, c.y + dz - 3, 12, rot);
+          proc(() => quarry(k, i), dx + 4, dz + 3);
+          break;
+        case 'fishing-boats':
+          if (!place(k, 'boat', c.x + dx, c.y + dz, 12, rot, WATER_LEVEL - 0.6)) proc(() => fishingBoat(k), dx, dz);
+          break;
+        case 'pasture':
+          proc(() => pasture(k, i), dx, dz);
+          break;
+        case 'plantation':
+          proc(() => plantation(k, i), dx, dz);
+          break;
+        case 'camp':
+          proc(() => camp(k), dx, dz);
+          break;
+      }
+    }
+  });
+  for (const cp of state.camps) {
+    const c = tileCenter(state, cp.pos);
+    const k = kitFor(-2);
+    k.push(c.x, field.height(c.x, c.y) - 0.3, c.y, rnd(cp.pos, 5) * Math.PI);
+    barbarianCamp(k);
+    k.pop();
+  }
+  return meshesFromKits(kits, vcMat, teamMat);
 }

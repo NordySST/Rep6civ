@@ -14,6 +14,7 @@ npm run typecheck  # tsc --noEmit
 npm run build      # typecheck + build de produção em dist/
 npm run preview    # serve dist/ (necessário para testar o service worker)
 node scripts/make-icons.mjs   # regenera os PNGs do PWA a partir de public/icons/icon.svg
+python3 scripts/convert-usda.py <quaternius-stage>/models scripts/models.json  # refaz public/models/pack.*
 npm run e2e:gestures   # com `npm run preview -- --port 4175` rodando: testa pinça/arrasto com toques reais (CDP)
 ```
 
@@ -57,8 +58,8 @@ src/
            partir dos hexágonos), materials.ts (névoa e camada do chão nos shaders),
            world.ts (malhas: terreno em blocos, água, rios, árvores, cidades), models.ts
            (miniaturas low-poly das unidades, `Kit` de primitivas), structures.ts (melhorias,
-           distritos, maravilhas, acampamentos) e renderer3d.ts (câmera inclinada, toque por
-           raio, unidades 3D, figuras em pé).
+           distritos, maravilhas, acampamentos), pack.ts (modelos importados) e renderer3d.ts
+           (câmera inclinada, toque por raio, unidades 3D, figuras em pé).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
@@ -492,6 +493,30 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
 - Tema "Atlas de bronze": fontes OFL empacotadas (`@fontsource/cinzel` títulos,
   `@fontsource/alegreya-sans` texto; só o subconjunto latino), molduras de bronze, botões com
   relevo. `ui/icons.ts`: ícones SVG próprios (`icon(nome)`), já usados na barra superior.
+
+### Visual — Lote V2 (modelos 3D da Quaternius, CC0)
+
+- Fonte: pacotes CC0 da Quaternius em OpenUSD texto (cópia pública
+  `github.com/chibifire-stages/quaternius-stage`; os sites originais não são acessíveis daqui).
+  `scripts/convert-usda.py` lê os `.usda` (hierarquia de Xform, malhas, GeomSubsets e
+  materiais com `diffuseColor`), triangula e grava `public/models/pack.bin` (vértice de 10
+  bytes: posição int16 quantizada + cor sRGB + flag) e `pack.json` (caixas, encaixes).
+  `scripts/models.json` escolhe os modelos e opções: `pose` (gira articulações e refaz a
+  pele pelo esqueleto — cavaleiro de braços baixados, montado), `attach` (posições de mãos e
+  cabeça após a pose), `tint` (material tingido pela cor da equipe, ex.: armadura),
+  `team` (material pintado com a cor da equipe; "Main" sempre é), `recolor`, `rot`.
+  Crédito em `public/models/LICENSE.txt`.
+- `render3d/pack.ts` (`loadPack`/`decodePack`): baixa uma vez (fica no cache do SW) e gera
+  geometrias `neutral` e `team` (cores por vértice; o material da equipe multiplica). Enquanto
+  não chega (ou sem rede), tudo usa os modelos procedurais; ao chegar, a visão se refaz.
+- Uso: unidades (`packUnit` em `models.ts`: esquadrões de cavaleiros com arma/capacete/escudo
+  por tipo, cavalaria montada, tanque, carroça do colono/mercador, construtor, galé/
+  quadrirreme/caravela, barco de embarque; catapulta, encouraçado, religiosos e grandes
+  personalidades seguem procedurais); cidades (`buildCitiesPack`: centro por população e era,
+  casas, estandarte e torre na capital, muralhas); árvores (`buildTreesPack`); construções
+  (`buildStructuresPack`: templo, mercado, quartel, porto, armazém+moinho, torre do campus,
+  mina, pedreira, barco de pesca, fazenda 3D só em alta qualidade, 2 das 5 formas de
+  maravilha). A cor da equipe vai em malhas por dono (`meshesFromKits`, `worldTeamMat`).
 
 ## Plano das 8 etapas
 

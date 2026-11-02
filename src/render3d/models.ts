@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { UNITS } from '../data/units';
+import type { Pack, PackModel } from './pack';
 import { linear } from './terrain';
 
 /**
@@ -49,7 +50,11 @@ export class Kit {
       new THREE.Vector3(1, 1, 1),
     );
     g = g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(this.m, local));
-    if (color === 'team') this.team.push(g);
+    if (color === 'team') {
+      // branco: o material da equipe dá a cor
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(1), 3));
+      this.team.push(g);
+    }
     else {
       const c = linear(color);
       const arr = new Float32Array(g.attributes.position.count * 3);
@@ -76,10 +81,24 @@ export class Kit {
     return this.add(new THREE.IcosahedronGeometry(r, detail), color, x, y, z);
   }
 
+  /** Modelo importado (pacote Quaternius) com transformação local; `rx`/`rz` inclinam. */
+  model(m: PackModel | undefined, x = 0, y = 0, z = 0, ry = 0, s = 1, rx = 0, rz = 0): this {
+    if (!m) return this;
+    const t = new THREE.Matrix4().compose(
+      new THREE.Vector3(x, y, z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
+      new THREE.Vector3(s, s, s),
+    );
+    const mat = new THREE.Matrix4().multiplyMatrices(this.m, t);
+    if (m.neutral) this.neutral.push(m.neutral.clone().applyMatrix4(mat));
+    if (m.team) this.team.push(m.team.clone().applyMatrix4(mat));
+    return this;
+  }
+
   build(): Model {
     return {
       neutral: this.neutral.length ? mergeGeometries(this.neutral) : null,
-      team: this.team.length ? (mergeGeometries(this.team.map((g) => (g.deleteAttribute('color'), g))) ?? null) : null,
+      team: this.team.length ? (mergeGeometries(this.team) ?? null) : null,
     };
   }
 }
@@ -202,7 +221,159 @@ function wagon(k: Kit, x: number, z: number, canvas: string): void {
   k.pop();
 }
 
-export function unitModel(type: string, embarked = false): Model {
+// ------------------------------------------------------------------ com modelos importados
+
+type Gear = { weapon?: string; ws?: number; helmet?: string; shield?: string; wrz?: number };
+
+/** Coloca `part` com o ponto de pegada (25% da altura) no encaixe `at` do boneco. */
+function grip(k: Kit, part: PackModel | undefined, at: [number, number, number] | undefined, s: number, rz = 0): void {
+  if (!part || !at) return;
+  const cx = (part.min[0] + part.max[0]) / 2;
+  const cz = (part.min[2] + part.max[2]) / 2;
+  const gy = part.min[1] + 0.25 * (part.max[1] - part.min[1]);
+  k.push(at[0], at[1], at[2], 0, 1);
+  k.model(part, -cx * s, -gy * s, -cz * s, 0, s, 0, rz);
+  k.pop();
+}
+
+/** Um soldado importado (≈9 de altura) com equipamento. */
+function soldier(k: Kit, pack: Pack, x: number, z: number, g: Gear, ry = 0, rider = false): void {
+  const body = pack.get(rider ? 'rider' : 'knight');
+  if (!body) return;
+  const S = 9 / (body.max[1] - body.min[1]);
+  k.push(x, -body.min[1] * S, z, ry, S);
+  k.model(body);
+  const pts = body.points;
+  if (g.weapon) grip(k, pack.get(g.weapon), pts.Palm_R, g.ws ?? 0.45, g.wrz ?? 0);
+  if (g.shield) {
+    const sh = pack.get(g.shield);
+    const p = pts.Palm_L;
+    if (sh && p) {
+      const cy = (sh.min[1] + sh.max[1]) / 2;
+      k.model(sh, p[0] + 0.25, p[1] - cy * 0.75, p[2] + 0.35, Math.PI / 2, 0.75);
+    }
+  }
+  if (g.helmet) {
+    const hm = pack.get(g.helmet);
+    const p = pts.Head;
+    if (hm && p) k.model(hm, p[0] - ((hm.min[0] + hm.max[0]) / 2) * 1.05, p[1] - 0.15 - hm.min[1] * 1.05, p[2] - ((hm.min[2] + hm.max[2]) / 2) * 1.05, 0, 1.05);
+  }
+  k.pop();
+}
+
+function squad3(k: Kit, pack: Pack, g: Gear): void {
+  soldier(k, pack, -3.8, -1.8, g);
+  soldier(k, pack, 3.8, -1.8, g);
+  soldier(k, pack, 0, 2.8, g);
+}
+
+/** Escala para o maior lado do modelo medir `size`. */
+function fit(m: PackModel | undefined, size: number, axis: 0 | 1 | 2 = 2): number {
+  return m ? size / Math.max(1e-6, m.max[axis] - m.min[axis]) : 1;
+}
+
+function base(m: PackModel | undefined, s: number): number {
+  return m ? -m.min[1] * s : 0;
+}
+
+function packUnit(type: string, embarked: boolean, pack: Pack): Model | null {
+  const k = new Kit();
+  const ship = (name: string, len: number, ry = 0) => {
+    const m = pack.get(name);
+    if (!m) return false;
+    const s = fit(m, len);
+    k.model(m, -((m.min[0] + m.max[0]) / 2) * s, -1.2 - m.min[1] * s * 0.0, -((m.min[2] + m.max[2]) / 2) * s, ry, s);
+    return true;
+  };
+  if (embarked) {
+    if (!ship('boatSail', 13)) return null;
+    soldier(k, pack, 0, -1, {}, 0);
+    return k.build();
+  }
+  switch (type) {
+    case 'warrior':
+      squad3(k, pack, { weapon: 'club', ws: 1, shield: 'shieldRound' });
+      break;
+    case 'barbarian-raider':
+      squad3(k, pack, { weapon: 'axe', ws: 0.45 });
+      break;
+    case 'slinger':
+      squad3(k, pack, {});
+      break;
+    case 'archer':
+      squad3(k, pack, { weapon: 'bow', ws: 0.55, helmet: 'helmet1' });
+      break;
+    case 'spearman':
+      squad3(k, pack, { weapon: 'spear', ws: 0.8, helmet: 'helmet1', shield: 'shieldRound' });
+      break;
+    case 'swordsman':
+      squad3(k, pack, { weapon: 'sword', ws: 0.45, helmet: 'helmet2', shield: 'shieldHeater' });
+      break;
+    case 'musketeer':
+    case 'line-infantry':
+      squad3(k, pack, { weapon: 'rifle', ws: 1.25, wrz: Math.PI / 2, helmet: type === 'musketeer' ? 'helmet3' : undefined });
+      if (type === 'line-infantry') soldier(k, pack, -7, 2.6, { weapon: 'rifle', ws: 1.25, wrz: Math.PI / 2 });
+      break;
+    case 'scout':
+      soldier(k, pack, 0, 0, { weapon: 'spear', ws: 0.8 });
+      break;
+    case 'builder':
+      soldier(k, pack, -2, 1, { weapon: 'hammer', ws: 0.5 });
+      k.box(4, 1.2, 2.2, '#7a5532', 3, 0, -1);
+      k.box(3.6, 1.2, 2.2, '#7a5532', 3, 1.2, -1, 0.4);
+      break;
+    case 'horseman': {
+      const horse = pack.get('horse');
+      if (!horse) return null;
+      const hs = fit(horse, 11, 1) * 0.95;
+      for (const [hx, hz] of [
+        [-4, 0.5],
+        [4, -1.5],
+      ]) {
+        k.push(hx, 0, hz);
+        k.model(horse, -((horse.min[0] + horse.max[0]) / 2) * hs, base(horse, hs), -((horse.min[2] + horse.max[2]) / 2) * hs, 0, hs);
+        soldier(k, pack, 0, -0.6, { weapon: hz < 0 ? 'spear' : 'sword', ws: hz < 0 ? 0.8 : 0.45, helmet: 'helmet2' }, 0, true);
+        k.pop();
+      }
+      // o cavaleiro montado fica sobre a sela
+      break;
+    }
+    case 'tank': {
+      const m = pack.get('tank');
+      if (!m) return null;
+      const s = fit(m, 15, 0);
+      k.model(m, 0, base(m, s), 0, Math.PI / 2, s);
+      break;
+    }
+    case 'settler':
+    case 'trader': {
+      const cart = pack.get('cart');
+      if (!cart) return null;
+      const s = fit(cart, 10);
+      k.model(cart, 3 - ((cart.min[0] + cart.max[0]) / 2) * s, base(cart, s), -((cart.min[2] + cart.max[2]) / 2) * s, 0, s);
+      soldier(k, pack, -3.5, 1, type === 'settler' ? { weapon: 'spear', ws: 0.6 } : {});
+      break;
+    }
+    case 'galley':
+      if (!ship('vikingBoat', 15)) return null;
+      break;
+    case 'quadrireme':
+      if (!ship('vikingBoat', 19)) return null;
+      break;
+    case 'caravel':
+      if (!ship('sailShip', 18)) return null;
+      break;
+    default:
+      return null;
+  }
+  return k.build();
+}
+
+export function unitModel(type: string, embarked = false, pack?: Pack | null): Model {
+  if (pack) {
+    const m = packUnit(type, embarked, pack);
+    if (m) return m;
+  }
   const k = new Kit();
   const def = UNITS[type];
   if (embarked) {

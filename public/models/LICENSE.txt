@@ -1,0 +1,6 @@
+Modelos 3D: Quaternius (https://quaternius.com) — licença CC0 1.0 (domínio público).
+Pacotes usados: Ultimate Fantasy RTS, Knight Character, Medieval Weapons, Ships,
+Medieval Village, Farm Animal, Animated Tanks, Pirate Kit, Fantasy Props Mega Kit.
+Convertidos de OpenUSD (cópia em github.com/chibifire-stages/quaternius-stage) para
+o formato compacto do jogo por scripts/convert-usda.py (ver scripts/models.json).
+Obrigado, Quaternius!
