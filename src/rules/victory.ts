@@ -8,12 +8,14 @@ import { hasAllTechs } from './cities';
  * Condições de vitória e pontuação.
  *  - Dominação: controlar a capital original de todas as civilizações (≥ 2 na partida).
  *  - Científica: concluir o projeto Expedição Celeste (exige todas as tecnologias).
- *  - Cultural: todas as cívicas e cultura acumulada ≥ 1000 e ≥ 2× a de cada rival ativo.
- *  - Religiosa: sua religião é seguida pela maioria das cidades de cada civilização (≥ 2).
+ *  - Cultural: todas as cívicas e cultura acumulada ≥ 3000 e ≥ 1,5× a de cada rival ativo.
+ *  - Religiosa: sua religião é seguida pela maioria das cidades de cada civilização (≥ 2)
+ *    e por mais da metade de todas as cidades do mundo.
  *  - Pontuação: no turno final, a maior pontuação vence.
  */
 
-export const CULTURE_VICTORY_MIN = 1000;
+export const CULTURE_VICTORY_MIN = 3000;
+export const CULTURE_VICTORY_RATIO = 1.5;
 
 export const VICTORY_LABELS: Record<VictoryType, string> = {
   domination: 'Dominação',
@@ -83,6 +85,13 @@ export function religionProgress(state: GameState, id: number): { majority: numb
   return { majority, total: civs.length };
 }
 
+/** Fração de todas as cidades do mundo (inclui cidades-estado) que segue a religião do jogador. */
+export function worldReligionShare(state: GameState, id: number): number {
+  const rel = state.religions.find((r) => r.founder === id);
+  if (!rel || !state.cities.length) return 0;
+  return state.cities.filter((c) => c.religion === rel.id).length / state.cities.length;
+}
+
 export function cultureProgress(state: GameState, id: number): { civics: number; totalCivics: number; culture: number; bestRival: number } {
   const p = state.players[id];
   const rivals = activeMajors(state).filter((x) => x.id !== id);
@@ -111,12 +120,14 @@ export function checkVictory(state: GameState): Winner | null {
     if (multi && dom.total >= 2 && dom.held === dom.total) return (state.winner = { player: p.id, type: 'domination', turn: state.turn });
     // cultura
     const cul = cultureProgress(state, p.id);
-    if (cul.civics === cul.totalCivics && cul.culture >= CULTURE_VICTORY_MIN && cul.culture >= cul.bestRival * 2) {
+    if (cul.civics === cul.totalCivics && cul.culture >= CULTURE_VICTORY_MIN && cul.culture >= cul.bestRival * CULTURE_VICTORY_RATIO) {
       return (state.winner = { player: p.id, type: 'culture', turn: state.turn });
     }
     // religião
     const rel = religionProgress(state, p.id);
-    if (multi && rel.total >= 2 && rel.majority === rel.total) return (state.winner = { player: p.id, type: 'religion', turn: state.turn });
+    if (multi && rel.total >= 2 && rel.majority === rel.total && worldReligionShare(state, p.id) > 0.5) {
+      return (state.winner = { player: p.id, type: 'religion', turn: state.turn });
+    }
   }
   // pontuação no turno final
   const limit = state.settings.turnLimit;

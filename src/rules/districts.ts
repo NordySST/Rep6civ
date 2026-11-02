@@ -235,6 +235,14 @@ export function abilityTileBonus(civId: string | undefined, t: Tile): Yields | n
       return t.terrain === 'tundra' || t.terrain === 'snow' ? { ...emptyYields(), production: 1 } : null;
     case 'qasmira':
       return t.terrain === 'desert' ? { ...emptyYields(), gold: 1, faith: 1 } : null;
+    case 'ilhavar':
+      return t.terrain === 'coast' || t.terrain === 'ocean' ? { ...emptyYields(), gold: 1 } : null;
+    case 'kaluun':
+      return t.terrain === 'plains' ? { ...emptyYields(), production: 1 } : null;
+    case 'tzeltani':
+      return t.hills ? { ...emptyYields(), food: 1 } : null;
+    case 'oskari':
+      return t.feature === 'forest' ? { ...emptyYields(), science: 1 } : null;
     default:
       return null;
   }

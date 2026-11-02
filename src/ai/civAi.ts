@@ -101,6 +101,12 @@ const BUILD_ORDER = [
   'university',
   'temple',
   'amphitheater',
+  'bank',
+  'observatory',
+  'factory',
+  'stock-exchange',
+  'research-lab',
+  'power-plant',
 ];
 
 const DISTRICT_PREF: Record<string, string[]> = {

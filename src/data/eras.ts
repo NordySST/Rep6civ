@@ -10,4 +10,7 @@ export const ERAS: EraDef[] = [
   { id: 'ancient', name: 'Era Antiga', minTechCost: 0 },
   { id: 'classical', name: 'Era Clássica', minTechCost: 80 },
   { id: 'medieval', name: 'Era Medieval', minTechCost: 160 },
+  { id: 'renaissance', name: 'Era Renascentista', minTechCost: 260 },
+  { id: 'industrial', name: 'Era Industrial', minTechCost: 400 },
+  { id: 'modern', name: 'Era Moderna', minTechCost: 600 },
 ];

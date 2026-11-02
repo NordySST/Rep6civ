@@ -59,6 +59,8 @@ export function spawnCamp(state: GameState, avoid: number[] = []): number | null
 
 /** Tipo de unidade gerada conforme a era (turno). */
 function spawnType(state: GameState): string {
+  if (state.turn >= 160) return nextRandom(state) < 0.5 ? 'line-infantry' : 'musketeer';
+  if (state.turn >= 110) return nextRandom(state) < 0.5 ? 'musketeer' : 'horseman';
   if (state.turn >= 60) return nextRandom(state) < 0.5 ? 'swordsman' : 'horseman';
   if (state.turn >= 30) return nextRandom(state) < 0.5 ? 'archer' : 'spearman';
   return nextRandom(state) < 0.25 ? 'slinger' : 'barbarian-raider';
