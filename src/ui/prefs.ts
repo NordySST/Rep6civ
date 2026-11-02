@@ -8,6 +8,8 @@ export interface Prefs {
   view3d: boolean;
   /** Gráficos 3D em alta qualidade (sombras, água e nuvens animadas); `undefined` = pelo aparelho. */
   hq3d?: boolean;
+  /** Jogadas de rivais e bárbaros mostradas uma a uma, com a câmera acompanhando. */
+  watchAi?: boolean;
   seenTips: string[];
 }
 

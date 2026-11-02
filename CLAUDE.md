@@ -47,7 +47,8 @@ src/
            religion.ts (panteão, fundação, pressão, missionários), greatPeople.ts,
            victory.ts (vitórias, pontuação, eras),
            diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
-           suseranos, território fechado, eliminação),
+           suseranos, território fechado, eliminação), settle.ts (avaliação de locais
+           para cidades do ponto de vista do jogador: lente do colono e avisos),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom), renderer.ts (arte procedural) e
            view.ts (interface `MapView` comum às visões 2D e 3D).
@@ -455,6 +456,25 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   afundamento (árvores, cidades, construções) também no passe de sombra.
 - Inexplorado mostra nuvens (`rep6Clouds`, ruído no shader) em vez de cor chapada; a água
   ondula e faz espuma no raso (alfa do vértice indica a profundidade).
+
+### Lente do colono e jogadas dos rivais
+
+- `rules/settle.ts` (puro, testado em `tests/settle.test.ts`): `siteInfo` avalia um local só
+  com o que o jogador conhece (hexágonos explorados, recursos revelados, cidades em
+  hexágonos explorados — não vaza informação); moradia inicial igual a `cityHousing`
+  (+3 rio, +1 costa, +1 Palácio na primeira cidade). `rankSites` classifica os locais a até
+  6 do colono (3 ótimo ≥ 85% do melhor, 2 bom ≥ 65%, 1 fraco) e escolhe até 3 melhores
+  afastados; `siteWarnings` lista ressalvas (sem água doce, pouca comida, terreno pobre,
+  local bem melhor a até 3); `siteSummary` resume os motivos. Nenhuma regra mudou.
+- UI: com um colono selecionado, `Overlay.settle` pinta os locais (verde/amarelo/vermelho,
+  ★1–3 nos melhores; no 3D vai na camada do chão) e o painel mostra "Aqui" e "Destino" com
+  a nota e os motivos. "Fundar cidade" num local com ressalvas pede confirmação.
+- Preferência "Ver jogadas dos rivais passo a passo" (`watchAi`): no fim do turno,
+  `queueEffects(…, sequential)` encadeia as jogadas visíveis de rivais e bárbaros com um
+  cursor global e agenda a câmera (`CamKey`) até cada uma que estiver fora da área central;
+  durante a reprodução aparece "toque para pular" (`playback`), toques e o botão de turno
+  pulam, e a seleção da próxima unidade e os diálogos esperam o fim (`afterPlayback`).
+  Desligada (padrão): tudo anima ao mesmo tempo, rapidamente.
 
 ## Plano das 8 etapas
 

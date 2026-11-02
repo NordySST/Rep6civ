@@ -481,3 +481,27 @@ button.turn-info { color: var(--text); font: inherit; cursor: pointer; }
   display: block;
   pointer-events: none;
 }
+
+/* ---------- reprodução das jogadas dos rivais ---------- */
+.playback-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + var(--tap) * 2 + 4 * var(--gap));
+  transform: translateX(-50%);
+  min-height: var(--tap);
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(10, 14, 20, 0.88);
+  color: var(--text);
+  font: inherit;
+  z-index: 6;
+  animation: playback-pulse 1.6s ease-in-out infinite;
+}
+.playback-hint[hidden] { display: none; }
+@keyframes playback-pulse {
+  50% { opacity: 0.65; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .playback-hint { animation: none; }
+}

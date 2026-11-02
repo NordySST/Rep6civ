@@ -402,6 +402,7 @@ export class Renderer3D implements MapView {
       ids(overlay.reachable),
       ids(overlay.attackTargets),
       overlay.pendingAttack ?? '',
+      overlay.settle ? `${ids(overlay.settle.tiers.keys())}/${[...overlay.settle.tiers.values()].join('')}/${ids(overlay.settle.best)}` : '',
       overlay.placement ? `${ids(overlay.placement.sites.keys())}/${[...overlay.placement.sites.values()].join(',')}/${overlay.placement.chosen ?? ''}` : '',
       cv ? `${cv.cityId}/${ids(cv.worked)}/${ids(cv.locked)}/${ids(cv.buyable.keys())}` : '',
     ].join('|');
