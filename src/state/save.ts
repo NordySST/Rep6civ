@@ -112,6 +112,13 @@ export const MIGRATIONS: MigrationTable = {
       rngCounter: s.rngCounter ?? 0,
     };
   },
+  // v4 → v5 (etapa 5): diplomacia, emissários e propostas.
+  4: (s) => ({
+    ...s,
+    players: s.players.map((p: any) => ({ envoyTokens: 0, ...p })),
+    diplomacy: s.diplomacy ?? {},
+    proposals: s.proposals ?? [],
+  }),
 };
 
 export class SaveError extends Error {}

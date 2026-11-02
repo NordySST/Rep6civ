@@ -5,6 +5,7 @@ import { UNITS, type UnitDef } from '../data/units';
 import type { City, GameState, Unit } from '../state/types';
 import { assignCitizens } from './cities';
 import { directionTo, distance, neighbors, tilesInRadius } from './hex';
+import { isAtWar } from './diplomacy';
 import { createRng } from './rng';
 import { riverOnEdge } from './tiles';
 import { computeVisibility } from './visibility';
@@ -28,10 +29,11 @@ export const CAMP_GOLD = 25;
 
 // ------------------------------------------------------------------ guerra
 
-/** Estão em guerra? Bárbaros guerreiam com todos; diplomacia entre civilizações vem na etapa 5. */
+/** Estão em guerra? Bárbaros guerreiam com todos; entre civilizações vale a diplomacia. */
 export function atWar(state: GameState, a: number, b: number): boolean {
   if (a === b) return false;
-  return !!state.players[a]?.isBarbarian || !!state.players[b]?.isBarbarian;
+  if (state.players[a]?.isBarbarian || state.players[b]?.isBarbarian) return true;
+  return isAtWar(state, a, b);
 }
 
 export function barbarianId(state: GameState): number {
@@ -207,13 +209,13 @@ export function targetAt(state: GameState, attacker: Unit, pos: number): Target 
 }
 
 /** Por que a unidade não pode atacar a posição (ou null se pode). */
-export function cannotAttack(state: GameState, u: Unit, pos: number): string | null {
+export function cannotAttack(state: GameState, u: Unit, pos: number, visCache?: Uint8Array): string | null {
   const def = UNITS[u.type];
   if (def.class !== 'military') return 'Unidades civis não atacam.';
   if (u.movesLeft <= 0) return 'Sem movimentos restantes.';
   const target = targetAt(state, u, pos);
   if (!target) return 'Não há inimigo aí.';
-  const vis = computeVisibility(state, u.owner);
+  const vis = visCache ?? computeVisibility(state, u.owner);
   if (!vis[pos]) return 'Alvo fora de vista.';
   const d = distance(state.map, u.pos, pos);
   if (isRanged(u)) {
@@ -459,7 +461,10 @@ export function cityAttackTargets(state: GameState, city: City): number[] {
 export function attackTargets(state: GameState, u: Unit): number[] {
   if (UNITS[u.type].class !== 'military' || u.movesLeft <= 0) return [];
   const r = isRanged(u) ? unitRange(u) : 1;
-  return tilesInRadius(state.map, u.pos, r).filter((i) => i !== u.pos && cannotAttack(state, u, i) === null);
+  const cand = tilesInRadius(state.map, u.pos, r).filter((i) => i !== u.pos && targetAt(state, u, i));
+  if (!cand.length) return [];
+  const vis = computeVisibility(state, u.owner);
+  return cand.filter((i) => cannotAttack(state, u, i, vis) === null);
 }
 
 // ------------------------------------------------------------------ zona de controle

@@ -39,15 +39,20 @@ src/
            políticas e agregação de modificadores), combat.ts (força, dano, ataques, ZOC,
            cidades, cura, promoções), barbarians.ts (acampamentos e comportamento bárbaro —
            NPC determinístico, fica em rules/; a IA de civilizações rivais fica em ai/),
+           diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
+           suseranos, território fechado, eliminação),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom) e renderer.ts (arte procedural).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts.
-  ai/      IA dos rivais (stub até a etapa 5).
+  ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
+           as regras fecham a rodada; `proposeDeal` para propostas do humano), civAi.ts
+           (pesquisa, governo, produção, colonos, construtores, militares), diplomacyAi.ts
+           (avaliar acordos, guerra/paz, aproximação, emissários), common.ts (`act`).
   main.ts  Ponto de entrada; registra o service worker em produção.
 public/    manifest.webmanifest, sw.js (offline), ícones.
 tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save, cidades,
-           construtores, pesquisa/políticas, combate/bárbaros). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
+           construtores, pesquisa/políticas, combate/bárbaros, diplomacia/IA). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
 ```
 
 ### Convenções
@@ -62,7 +67,10 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
 - **Dados separados da lógica.** Novo conteúdo (unidade, recurso, maravilha…) entra em
   `src/data/` e as regras o leem genericamente.
 - **Textos** da UI ficam em `src/ui/strings.ts` (pt-BR). Nomes de conteúdo ficam nos dados.
-- **render/ e ui/ não alteram o estado**: só despacham ações.
+- **render/ e ui/ não alteram o estado**: só despacham ações. O fim de turno vai por
+  `ai.playEndTurn` (não por `applyAction`) para que as IAs joguem.
+- **IA usa as mesmas ações** do humano via `reduceAction` (sem clonar a cada ação).
+  `ai/` depende de `rules/`, nunca o contrário.
 - **Hexágonos:** pointy-top, offset "odd-r". Direções/arestas: 0=L, 1=SE, 2=SO, 3=O, 4=NO, 5=NE.
   Aresta i fica entre os cantos i e i+1; a aresta i de A é a (i+3)%6 do vizinho. Rios são uma
   máscara de 6 bits por hexágono, sempre gravada dos dois lados (`setRiverEdge`).
@@ -165,6 +173,37 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   alvos a até 6 hexágonos (preferem civis), senão vagueiam perto do acampamento. Entrar
   num acampamento com unidade militar o destrói: +25 ouro. Agem no fim do turno do jogador.
 
+### Diplomacia e IA (etapa 5)
+
+- Jogadores: 0 = humano, 1 = bárbaros, depois civilizações rivais e cidades-estado
+  (padrões por tamanho de mapa, ajustáveis no Novo jogo). Cidades-estado começam com a
+  cidade fundada (sem Palácio).
+- Relações em `state.diplomacy["a-b"]`: contato (`met`), guerra (`war`, `since`), fronteiras
+  abertas/amizade com validade (30 turnos), ressentimentos por quem os guarda (decaem 3%/turno).
+- Contato: quando um jogador vê unidade, cidade ou território do outro.
+- Guerra: exige contato, sem amizade vigente e ≥ 5 turnos de paz; vítima ganha 40 de
+  ressentimento e terceiros que conhecem ambos, 10. Paz só após 10 turnos de guerra; ao
+  assinar, unidades são expulsas do território alheio.
+- Território: em paz sem fronteiras abertas, unidades não entram em território de outra
+  civilização (cidades-estado aceitam visitantes); `canOccupy`/A* respeitam isso.
+- Opinião da IA = guerra (−40) + amizade (+25) + fronteiras (+8) − ressentimentos −
+  fronteiras próximas (−8) + agenda do líder (Construtora, Erudito, Senhor da Guerra,
+  Mercadora, Expansionista). Atitude: ≥20 Amigável, ≤−20 Hostil.
+- Acordos (`DealItem`): paz, fronteiras abertas, amizade, ouro. A IA aceita se o valor
+  (opinião + interesse + ouro) for positivo; propostas da IA ao humano ficam em
+  `state.proposals` (expiram em 3 turnos) e aparecem num modal.
+- Emissários: +1 por cívica concluída e +1 a cada 15 turnos. 1/3/6 emissários numa
+  cidade-estado: +2/+2 do rendimento do tipo na capital e +1 em todas as cidades;
+  suserano (≥3 e mais que todos, sem empate) ganha o bônus da cidade-estado.
+- Eliminação: sem cidades depois de ter fundado alguma (ou sem nada). Humano eliminado → derrota.
+- IA (heurística, determinística): pesquisa barata/preferida pela agenda, governo pela
+  agenda, preenche políticas; produção por prioridades (defesa, colonos até a meta,
+  construtores, batedor, edifícios), compra com ouro sobrando; colonos buscam o melhor
+  local em raio 8; construtores melhoram hexágonos trabalhados/recursos; militares recuam
+  feridos, atacam com previsão favorável, caçam bárbaros perto de casa e inimigos em
+  guerra, guarnecem cidades; batedores exploram. Declara guerra só se hostil, vizinha,
+  turno ≥ 40 e 1,4× mais forte (chance pela agressividade do líder).
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),
@@ -178,7 +217,7 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    (`revealedBy`), governos e cartas de política, eurekas/inspirações.
 4. **[CONCLUÍDA] Combate** — força, dano, ZOC, bônus de terreno/rio/fortificação, unidades à distância,
    promoções, acampamentos bárbaros, captura de cidades, muralhas.
-5. **IA e diplomacia** — civilizações rivais (`src/ai`), múltiplos jogadores no turno,
+5. **[CONCLUÍDA] IA e diplomacia** — civilizações rivais (`src/ai`), múltiplos jogadores no turno,
    primeiro contato, guerra/paz, acordos, agendas dos líderes, cidades-estado.
 6. **Distritos e maravilhas** — distritos especializados com bônus de adjacência, edifícios,
    maravilhas mundiais, habilidades únicas das civilizações (já descritas em `data/civs.ts`).
@@ -188,6 +227,17 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 5 (concluída)
+- Save v5 (migração 4→5: `diplomacy`, `proposals`, `envoyTokens`).
+- Rivais e cidades-estado no novo jogo (contadores no formulário), agendas e agressividade
+  dos líderes, 8 cidades-estado inventadas de 6 tipos.
+- Regras de diplomacia, território fechado, emissários/suserania, eliminação.
+- IA completa para civilizações e cidades-estado; turno da IA antes do fechamento da rodada.
+- UI: botão 🤝 Diplomacia (atitude com explicação, acordos, guerra, emissários), modal de
+  propostas recebidas, avisos de contato/guerra/paz/suserania, tela de derrota.
+- Pendências: comércio de recursos e acordos de pesquisa; IA não usa estradas nem cerco
+  coordenado; vitória/pontuação na etapa 8.
 
 ### Etapa 4 (concluída)
 - Save v4 (migração 3→4: vida/XP/promoções das unidades, vida das cidades, jogador

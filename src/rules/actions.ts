@@ -15,6 +15,17 @@ import {
 import { canFoundCity, foundCity } from './city';
 import { runBarbarianTurn } from './barbarians';
 import { cannotAttack, cityAttack, clearCampAt, healUnits, promote, resolveAttack, type CombatEvent } from './combat';
+import {
+  applyDeal,
+  cannotApplyDeal,
+  checkContacts,
+  checkEliminations,
+  declareWar,
+  decayGrievances,
+  grantPeriodicEnvoys,
+  sendEnvoy,
+  type DiplomacyEvent,
+} from './diplomacy';
 import { setGovernment, setPolicy } from './effects';
 import { findPath, maxMoves, moveOneStep } from './movement';
 import { checkBoosts, processResearch, setResearch, type ResearchEvent, type TreeKind } from './research';
@@ -46,6 +57,9 @@ export type Action =
   | { type: 'attack'; unitId: number; target: number }
   | { type: 'cityAttack'; cityId: number; target: number }
   | { type: 'promote'; unitId: number; promotion: string }
+  | { type: 'declareWar'; target: number }
+  | { type: 'sendEnvoy'; cityState: number }
+  | { type: 'respondProposal'; id: number; accept: boolean }
   | { type: 'endTurn' };
 
 export type GameEvent =
@@ -56,7 +70,8 @@ export type GameEvent =
   | { type: 'info'; message: string }
   | CityEvent
   | ResearchEvent
-  | CombatEvent;
+  | CombatEvent
+  | DiplomacyEvent;
 
 export interface ActionResult {
   state: GameState;
@@ -97,10 +112,9 @@ export function advanceAlongPath(state: GameState, unit: Unit, events?: GameEven
   return moved;
 }
 
-export function applyAction(prev: GameState, action: Action): ActionResult {
-  const state = structuredClone(prev);
-  const events: GameEvent[] = [];
-  const fail = (message: string): ActionResult => ({ state: prev, events: [{ type: 'error', message }] });
+/** Aplica sem clonar (usado pela IA). Retorna mensagem de erro ou null. Em erro, o estado pode ter sido parcialmente alterado só se a ação já validou tudo antes de mutar. */
+export function reduceAction(state: GameState, action: Action, events: GameEvent[]): string | null {
+  const fail = (message: string): string => message;
 
   switch (action.type) {
     case 'move': {
@@ -242,14 +256,50 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
       if (why) return fail(why);
       break;
     }
+    case 'declareWar': {
+      const r = declareWar(state, state.currentPlayer, action.target);
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'sendEnvoy': {
+      const r = sendEnvoy(state, state.currentPlayer, action.cityState);
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'respondProposal': {
+      const k = state.proposals.findIndex((p) => p.id === action.id && p.to === state.currentPlayer);
+      if (k < 0) return fail('Proposta não encontrada.');
+      const prop = state.proposals[k];
+      state.proposals.splice(k, 1);
+      if (action.accept) {
+        const why = cannotApplyDeal(state, prop.from, prop.to, prop.items);
+        if (why) return fail(why);
+        events.push(...applyDeal(state, prop.from, prop.to, prop.items));
+      }
+      break;
+    }
     case 'endTurn': {
       events.push(...endTurn(state));
       events.push({ type: 'turnStarted', turn: state.turn });
       break;
     }
   }
-  // eurecas/inspirações obtidas pela ação
-  if (action.type !== 'endTurn') events.push(...checkBoosts(state, state.currentPlayer));
+  // eurecas/inspirações e contatos obtidos pela ação
+  if (action.type !== 'endTurn') {
+    events.push(...checkBoosts(state, state.currentPlayer));
+    // contato é verificado a cada ação humana; a IA verifica ao fim do próprio turno
+    if (state.players[state.currentPlayer]?.isHuman) events.push(...checkContacts(state));
+  }
+  return null;
+}
+
+export function applyAction(prev: GameState, action: Action): ActionResult {
+  const state = structuredClone(prev);
+  const events: GameEvent[] = [];
+  const err = reduceAction(state, action, events);
+  if (err) return { state: prev, events: [{ type: 'error', message: err }] };
   return { state, events };
 }
 
@@ -257,14 +307,20 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
 export function endTurn(state: GameState): GameEvent[] {
   const events: GameEvent[] = [];
   for (const p of state.players) p.policyChangeAvailable = false;
-  // turno dos bárbaros (depois do jogador)
+  // turno dos bárbaros (depois dos jogadores)
   events.push(...runBarbarianTurn(state));
   for (const c of [...state.cities]) events.push(...processCity(state, c));
-  const civs = state.players.filter((p) => !p.isBarbarian);
+  const civs = state.players.filter((p) => !p.isBarbarian && !p.eliminated);
   for (const p of civs) {
     events.push(...checkBoosts(state, p.id));
-    events.push(...processResearch(state, p.id));
+    const rev = processResearch(state, p.id);
+    // cada cívica concluída concede 1 emissário
+    for (const e of rev) if (e.type === 'civicDone' && !p.isCityState) p.envoyTokens++;
+    events.push(...rev);
   }
+  decayGrievances(state);
+  // propostas antigas expiram
+  state.proposals = state.proposals.filter((p) => state.turn - p.turn < 3);
   healUnits(state);
   state.turn++;
   for (const u of state.units) {
@@ -280,6 +336,9 @@ export function endTurn(state: GameState): GameEvent[] {
     revealForPlayer(state, p.id);
     events.push(...checkBoosts(state, p.id));
   }
+  events.push(...grantPeriodicEnvoys(state));
+  events.push(...checkContacts(state));
+  events.push(...checkEliminations(state));
   return events;
 }
 

@@ -371,3 +371,40 @@ input[type='text'] {
 .btn.danger { background: #c0392b; color: #fff; border-color: transparent; }
 .btn.danger:hover:not(:disabled) { background: #d84a3b; }
 .danger-text { color: #ff8a7a; }
+
+/* ---------- etapa 5: diplomacia ---------- */
+.counts { display: flex; flex-wrap: wrap; gap: var(--gap); }
+.counter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--btn);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 4px 8px;
+}
+.counter strong { min-width: 1.5em; text-align: center; }
+.dip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: #1a222c;
+}
+.dip-head { display: flex; align-items: center; gap: 10px; }
+.dip-head > div { display: flex; flex-direction: column; }
+.dip-head small, .dip-card small.muted { color: var(--muted); }
+.dip-card .actions { margin-top: 6px; }
+.good { color: #7cfc8a; }
+.turn-info { white-space: nowrap; flex: none; }
+@media (max-width: 560px) {
+  .turn-info small { display: none; }
+  .turn-info { padding: 0 8px; }
+  .topbar { gap: 6px; }
+  .topbar .btn.icon { width: 44px; min-width: 44px; }
+}
+@media (max-width: 430px) {
+  .civ-badge { display: none; }
+}

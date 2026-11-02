@@ -1,3 +1,5 @@
+import { CITY_STATE_TYPES, CITY_STATES } from './cityStates';
+
 /** Civilizações e líderes — todos inventados. */
 export interface CivDef {
   id: string;
@@ -9,8 +11,14 @@ export interface CivDef {
   secondaryColor: string;
   /** Habilidade única (implementada em etapas futuras). */
   ability: { name: string; description: string };
+  /** Agenda do líder (IA): o que aprecia/detesta nos outros. */
+  agenda?: { id: AgendaId; name: string; description: string };
+  /** 0–1: propensão a declarar guerra. */
+  aggression?: number;
   cityNames: string[];
 }
+
+export type AgendaId = 'builder' | 'scholar' | 'warmonger' | 'merchant' | 'expansionist';
 
 export const CIVS: CivDef[] = [
   {
@@ -22,6 +30,8 @@ export const CIVS: CivDef[] = [
     color: '#c0392b',
     secondaryColor: '#f6d365',
     ability: { name: 'Estradas de Mármore', description: 'Cidades conectadas geram ouro extra.' },
+    agenda: { id: 'builder', name: 'Construtora', description: 'Admira civilizações com muitos edifícios; despreza as que constroem pouco.' },
+    aggression: 0.3,
     cityNames: ['Valdora', 'Pedralta', 'Ventomar', 'Ruvelha', 'Ostrada', 'Cimaclara', 'Brumal', 'Lisandra', 'Torremar', 'Auripena'],
   },
   {
@@ -33,6 +43,8 @@ export const CIVS: CivDef[] = [
     color: '#2471a3',
     secondaryColor: '#d6eaf8',
     ability: { name: 'Conselho dos Rios', description: 'Hexágonos com rio rendem ciência extra.' },
+    agenda: { id: 'scholar', name: 'Erudito', description: 'Admira civilizações avançadas em ciência; despreza as atrasadas.' },
+    aggression: 0.2,
     cityNames: ['Tamaru', 'Kessaba', 'Ombaré', 'Ilunga', 'Nzawe', 'Morukai', 'Selundi', 'Abokan', 'Wezara', 'Tindoro'],
   },
   {
@@ -44,6 +56,8 @@ export const CIVS: CivDef[] = [
     color: '#5b2c6f',
     secondaryColor: '#e8daef',
     ability: { name: 'Forjas do Inverno', description: 'Tundra e neve rendem produção extra.' },
+    agenda: { id: 'warmonger', name: 'Senhor da Guerra', description: 'Respeita exércitos fortes; despreza os fracos.' },
+    aggression: 0.7,
     cityNames: ['Norvhal', 'Skarnheim', 'Ulvsted', 'Frostvik', 'Branmor', 'Kjellholm', 'Ravnås', 'Thurvik', 'Eldmark', 'Hrafnby'],
   },
   {
@@ -55,6 +69,8 @@ export const CIVS: CivDef[] = [
     color: '#d68910',
     secondaryColor: '#1d3557',
     ability: { name: 'Caravanas de Areia', description: 'Desertos rendem ouro e fé extras.' },
+    agenda: { id: 'merchant', name: 'Mercadora', description: 'Gosta de quem tem muito ouro; despreza quem é pobre.' },
+    aggression: 0.35,
     cityNames: ['Qasmira', 'Zahabad', 'Merrakesh', 'Ilnur', 'Saffaran', 'Daruna', 'Kharimet', 'Bayzar', 'Omrahan', 'Nehrazul'],
   },
   {
@@ -66,6 +82,8 @@ export const CIVS: CivDef[] = [
     color: '#1e8449',
     secondaryColor: '#f9e79f',
     ability: { name: 'Estepe sem Fim', description: 'Unidades começam com +1 de movimento em planícies.' },
+    agenda: { id: 'expansionist', name: 'Expansionista', description: 'Não tolera quem tem mais cidades que ele.' },
+    aggression: 0.55,
     cityNames: ['Yrkaan', 'Tögrul', 'Barskhan', 'Ölzii', 'Kharaguul', 'Sendürel', 'Möngar', 'Altanbul', 'Chuluut', 'Dzhirgal'],
   },
 ];
@@ -83,4 +101,19 @@ export const BARBARIAN_CIV: CivDef = {
   cityNames: [],
 };
 
-export const CIV_BY_ID: Record<string, CivDef> = Object.fromEntries([...CIVS, BARBARIAN_CIV].map((c) => [c.id, c]));
+/** Cidades-estado usam a mesma estrutura de "civilização" para cores e nome. */
+export const CITY_STATE_CIVS: CivDef[] = CITY_STATES.map((cs) => ({
+  id: cs.id,
+  name: cs.name,
+  adjective: cs.name,
+  leader: '—',
+  leaderTitle: '',
+  color: '#2c3e50',
+  secondaryColor: CITY_STATE_TYPES[cs.type].color,
+  ability: { name: CITY_STATE_TYPES[cs.type].name, description: cs.suzerainBonus },
+  cityNames: [cs.name],
+}));
+
+export const CIV_BY_ID: Record<string, CivDef> = Object.fromEntries(
+  [...CIVS, BARBARIAN_CIV, ...CITY_STATE_CIVS].map((c) => [c.id, c]),
+);
