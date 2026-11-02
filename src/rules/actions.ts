@@ -20,10 +20,20 @@ import { checkVictory, playerEra } from './victory';
 import { maintenanceOf } from './economy';
 import { activateGreatPerson, processGreatPeople, type GreatPersonEvent } from './greatPeople';
 import { neighbors } from './hex';
-import { canBuyMissionary, choosePantheon, foundReligion, spreadPressure, spreadReligion, type ReligionEvent } from './religion';
+import {
+  canBuyMissionary,
+  choosePantheon,
+  foundReligion,
+  purgeHeresy,
+  spreadPressure,
+  spreadReligion,
+  theologicalCombat,
+  type ReligionEvent,
+  type TheologyEvent,
+} from './religion';
 import { isPassableLand } from './tiles';
 import { cleanRoutes, establishRoute } from './trade';
-import { cannotAttack, cityAttack, clearCampAt, healUnits, promote, resolveAttack, type CombatEvent } from './combat';
+import { cannotAttack, cityAttack, clearCampAt, healUnits, nextRandom, promote, resolveAttack, type CombatEvent } from './combat';
 import {
   applyDeal,
   cannotApplyDeal,
@@ -80,6 +90,9 @@ export type Action =
   | { type: 'buyWithFaith'; cityId: number; unit: string }
   | { type: 'spreadReligion'; unitId: number; cityId: number }
   | { type: 'activateGreatPerson'; unitId: number }
+  | { type: 'theology'; unitId: number; target: number }
+  | { type: 'passTurn' }
+  | { type: 'purgeHeresy'; unitId: number; cityId: number }
   | { type: 'endTurn' };
 
 export type GameEvent =
@@ -94,6 +107,7 @@ export type GameEvent =
   | DiplomacyEvent
   | ReligionEvent
   | GreatPersonEvent
+  | TheologyEvent
   | { type: 'routeCreated'; owner: number; from: number; to: number }
   | { type: 'routeLost'; owner: number; from: number; to: number }
   | { type: 'disbanded'; player: number; unitType: string }
@@ -359,7 +373,7 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
       const def = UNITS[action.unit];
       if (!def?.faithCost) return fail('Esta unidade não é comprada com fé.');
-      const why = canBuyMissionary(state, c);
+      const why = canBuyMissionary(state, c, action.unit);
       if (why) return fail(why);
       const pos = [c.pos, ...neighbors(state.map, c.pos)].find(
         (i) => i >= 0 && isPassableLand(state.map.tiles[i]) && !state.units.some((x) => x.pos === i && UNITS[x.type].class === 'civilian'),
@@ -384,6 +398,29 @@ export function reduceAction(state: GameState, action: Action, events: GameEvent
       const u = findUnit(state, action.unitId);
       if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
       const r = spreadReligion(state, u, action.cityId);
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'passTurn': {
+      const next = nextHuman(state);
+      if (next === null) return fail('Não há outro jogador humano nesta rodada.');
+      state.currentPlayer = next;
+      events.push(...checkContacts(state));
+      break;
+    }
+    case 'theology': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = theologicalCombat(state, u, action.target, () => nextRandom(state));
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'purgeHeresy': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r = purgeHeresy(state, u, action.cityId);
       if (typeof r === 'string') return fail(r);
       events.push(...r);
       break;
@@ -493,6 +530,18 @@ export function payMaintenance(state: GameState): GameEvent[] {
     }
   }
   return events;
+}
+
+/** Jogadores humanos ativos, na ordem da rodada. */
+export function activeHumans(state: GameState): number[] {
+  return state.players.filter((p) => p.isHuman && !p.eliminated).map((p) => p.id);
+}
+
+/** Próximo humano depois do atual nesta rodada (null se o atual é o último). */
+export function nextHuman(state: GameState): number | null {
+  const hs = activeHumans(state);
+  const k = hs.indexOf(state.currentPlayer);
+  return k >= 0 && k < hs.length - 1 ? hs[k + 1] : null;
 }
 
 /** Unidades do jogador que ainda esperam ordens neste turno. */

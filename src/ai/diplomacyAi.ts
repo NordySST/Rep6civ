@@ -94,8 +94,16 @@ export function proposeDeal(prev: GameState, to: number, items: DealItem[]): Act
   const state = structuredClone(prev);
   const from = state.currentPlayer;
   const target = state.players[to];
-  if (!target || target.isHuman || target.isBarbarian || target.eliminated) {
+  if (!target || target.isBarbarian || target.eliminated) {
     return { state: prev, events: [{ type: 'error', message: 'Destinatário inválido.' }] };
+  }
+  if (target.isHuman) {
+    // entre humanos: vira proposta pendente, respondida na vez do outro jogador
+    const why = cannotApplyDeal(state, from, to, items);
+    if (why) return { state: prev, events: [{ type: 'error', message: why }] };
+    const id = state.nextId++;
+    state.proposals.push({ id, from, to, items, turn: state.turn });
+    return { state, events: [{ type: 'info', message: 'Proposta enviada. O outro jogador responde na vez dele.' }] };
   }
   const v = evaluateDeal(state, to, from, items);
   if (!v.accept) return { state: prev, events: [{ type: 'dealRejected', by: to, reason: v.reason }] };

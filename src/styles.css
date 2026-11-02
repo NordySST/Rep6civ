@@ -439,3 +439,4 @@ button.turn-info { color: var(--text); font: inherit; cursor: pointer; }
 }
 .spec-row { display: flex; align-items: center; gap: 6px; }
 .spec-row span { flex: 1; min-width: 0; }
+.modal.handoff { background: #0b0f14; }

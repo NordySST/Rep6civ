@@ -37,8 +37,14 @@ export interface UnitDef {
   faithCost?: number;
   /** Comerciante: cria rotas comerciais. */
   trader?: boolean;
-  /** Missionário: nº de difusões. */
+  /** Missionário/apóstolo: nº de difusões. */
   spreads?: number;
+  /** Pressão aplicada por difusão (padrão 100). */
+  spreadPressure?: number;
+  /** Força religiosa (combate teológico entre unidades religiosas). */
+  religiousStrength?: number;
+  /** Inquisidor: remove outras religiões das próprias cidades. */
+  inquisitor?: boolean;
   /** Grande personalidade (não produzível). */
   greatPerson?: string;
   /** Exige cidade costeira para produzir. */
@@ -206,8 +212,39 @@ export const UNITS: Record<string, UnitDef> = {
     sight: 2,
     strength: 0,
     spreads: 3,
+    religiousStrength: 15,
     glyph: '☦',
     description: 'Difunde a sua religião em cidades (3 usos). Comprado com fé.',
+  },
+  apostle: {
+    id: 'apostle',
+    name: 'Apóstolo',
+    class: 'civilian',
+    moves: 3,
+    cost: 0,
+    faithCost: 140,
+    sight: 2,
+    strength: 0,
+    spreads: 3,
+    spreadPressure: 150,
+    religiousStrength: 30,
+    glyph: '✝',
+    description: 'Difunde com mais força (150) e trava combate teológico contra outras religiões.',
+  },
+  inquisitor: {
+    id: 'inquisitor',
+    name: 'Inquisidor',
+    class: 'civilian',
+    moves: 3,
+    cost: 0,
+    faithCost: 90,
+    sight: 2,
+    strength: 0,
+    spreads: 3,
+    inquisitor: true,
+    religiousStrength: 20,
+    glyph: '⚖',
+    description: 'Remove outras religiões das suas cidades (3 usos).',
   },
   galley: {
     id: 'galley',
@@ -341,6 +378,8 @@ export const UNIT_ORDER = [
   'builder',
   'trader',
   'missionary',
+  'apostle',
+  'inquisitor',
   'scout',
   'warrior',
   'slinger',
