@@ -13,6 +13,8 @@ import {
   type CityEvent,
 } from './cities';
 import { canFoundCity, foundCity } from './city';
+import { runBarbarianTurn } from './barbarians';
+import { cannotAttack, cityAttack, clearCampAt, healUnits, promote, resolveAttack, type CombatEvent } from './combat';
 import { setGovernment, setPolicy } from './effects';
 import { findPath, maxMoves, moveOneStep } from './movement';
 import { checkBoosts, processResearch, setResearch, type ResearchEvent, type TreeKind } from './research';
@@ -41,6 +43,9 @@ export type Action =
   | { type: 'setResearch'; kind: TreeKind; id: string }
   | { type: 'setGovernment'; id: string }
   | { type: 'setPolicy'; slot: number; policy: string | null }
+  | { type: 'attack'; unitId: number; target: number }
+  | { type: 'cityAttack'; cityId: number; target: number }
+  | { type: 'promote'; unitId: number; promotion: string }
   | { type: 'endTurn' };
 
 export type GameEvent =
@@ -50,7 +55,8 @@ export type GameEvent =
   | { type: 'turnStarted'; turn: number }
   | { type: 'info'; message: string }
   | CityEvent
-  | ResearchEvent;
+  | ResearchEvent
+  | CombatEvent;
 
 export interface ActionResult {
   state: GameState;
@@ -62,7 +68,7 @@ function findUnit(state: GameState, id: number): Unit | undefined {
 }
 
 /** Avança a unidade pelo caminho guardado enquanto houver movimento. Muta. */
-export function advanceAlongPath(state: GameState, unit: Unit): boolean {
+export function advanceAlongPath(state: GameState, unit: Unit, events?: GameEvent[]): boolean {
   let moved = false;
   while (unit.path && unit.path.length && unit.movesLeft > 0) {
     const next = unit.path[0];
@@ -78,8 +84,14 @@ export function advanceAlongPath(state: GameState, unit: Unit): boolean {
       continue;
     }
     moved = true;
+    unit.acted = true;
     unit.path.shift();
     revealForPlayer(state, unit.owner);
+    const camp = clearCampAt(state, unit);
+    if (camp) {
+      events?.push(camp);
+      delete unit.path;
+    }
   }
   if (unit.path && unit.path.length === 0) delete unit.path;
   return moved;
@@ -99,7 +111,7 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
       const from = u.pos;
       u.path = res.path;
       u.skipped = false;
-      advanceAlongPath(state, u);
+      advanceAlongPath(state, u, events);
       events.push({ type: 'unitMoved', unitId: u.id, from, to: u.pos });
       break;
     }
@@ -145,6 +157,7 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
             ? buildRoad(state, u)
             : removeFeature(state, u);
       if (!r.ok) return fail(r.reason);
+      if (state.units.includes(u)) u.acted = true;
       if ('production' in r && r.production) events.push({ type: 'info', message: `+${r.production} de produção para a cidade.` });
       break;
     }
@@ -205,6 +218,30 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
       for (const c of state.cities) if (c.owner === p.id) assignCitizens(state, c);
       break;
     }
+    case 'attack': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const why = cannotAttack(state, u, action.target);
+      if (why) return fail(why);
+      events.push(...resolveAttack(state, u, action.target));
+      revealForPlayer(state, state.currentPlayer);
+      break;
+    }
+    case 'cityAttack': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      const r = cityAttack(state, c, action.target);
+      if (typeof r === 'string') return fail(r);
+      events.push(...r);
+      break;
+    }
+    case 'promote': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const why = promote(u, action.promotion);
+      if (why) return fail(why);
+      break;
+    }
     case 'endTurn': {
       events.push(...endTurn(state));
       events.push({ type: 'turnStarted', turn: state.turn });
@@ -217,23 +254,29 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
 }
 
 /** Fim de turno (muta). Processa cidades, depois renova unidades. */
-export function endTurn(state: GameState): (CityEvent | ResearchEvent)[] {
-  const events: (CityEvent | ResearchEvent)[] = [];
+export function endTurn(state: GameState): GameEvent[] {
+  const events: GameEvent[] = [];
   for (const p of state.players) p.policyChangeAvailable = false;
+  // turno dos bárbaros (depois do jogador)
+  events.push(...runBarbarianTurn(state));
   for (const c of [...state.cities]) events.push(...processCity(state, c));
-  for (const p of state.players) {
+  const civs = state.players.filter((p) => !p.isBarbarian);
+  for (const p of civs) {
     events.push(...checkBoosts(state, p.id));
     events.push(...processResearch(state, p.id));
   }
+  healUnits(state);
   state.turn++;
   for (const u of state.units) {
     u.movesLeft = maxMoves(state, u);
     u.skipped = false;
   }
   for (const u of state.units) {
-    if (u.path?.length) advanceAlongPath(state, u);
+    if (u.path?.length) advanceAlongPath(state, u, events);
   }
-  for (const p of state.players) {
+  // movimento automático não conta como ação para a cura do próximo turno
+  for (const u of state.units) u.acted = false;
+  for (const p of civs) {
     revealForPlayer(state, p.id);
     events.push(...checkBoosts(state, p.id));
   }

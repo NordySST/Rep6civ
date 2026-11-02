@@ -76,6 +76,42 @@ export const MIGRATIONS: MigrationTable = {
       ...p,
     })),
   }),
+  // v3 → v4 (etapa 4): vida/experiência, vida das cidades, bárbaros.
+  3: (s) => {
+    const players = [...s.players];
+    if (!players.some((p: any) => p.isBarbarian)) {
+      players.push({
+        id: players.length,
+        civId: 'barbarian',
+        isHuman: false,
+        isBarbarian: true,
+        explored: new Array(s.map.tiles.length).fill(0),
+        citiesFounded: 0,
+        gold: 0,
+        science: 0,
+        culture: 0,
+        faith: 0,
+        techs: [],
+        researching: null,
+        techProgress: {},
+        civics: [],
+        researchingCivic: null,
+        civicProgress: {},
+        boosts: [],
+        government: null,
+        policies: [],
+        policyChangeAvailable: false,
+      });
+    }
+    return {
+      ...s,
+      players,
+      units: s.units.map((u: any) => ({ hp: 100, xp: 0, promotions: [], ...u })),
+      cities: s.cities.map((c: any) => ({ hp: 200, ...c })),
+      camps: s.camps ?? [],
+      rngCounter: s.rngCounter ?? 0,
+    };
+  },
 };
 
 export class SaveError extends Error {}

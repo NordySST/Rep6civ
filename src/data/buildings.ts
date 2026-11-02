@@ -84,6 +84,14 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     yields: { gold: 3 },
     description: '+3 Ouro.',
   },
+  walls: {
+    id: 'walls',
+    name: 'Muralhas',
+    cost: 80,
+    yields: {},
+    requiresTech: 'masonry',
+    description: '+8 de defesa e +100 de vida da cidade; a cidade pode atacar à distância.',
+  },
   lighthouse: {
     id: 'lighthouse',
     requiresTech: 'sailing',

@@ -70,4 +70,17 @@ export const CIVS: CivDef[] = [
   },
 ];
 
-export const CIV_BY_ID: Record<string, CivDef> = Object.fromEntries(CIVS.map((c) => [c.id, c]));
+/** Bárbaros: "civilização" especial, sem cidades nem pesquisa. */
+export const BARBARIAN_CIV: CivDef = {
+  id: 'barbarian',
+  name: 'Bárbaros',
+  adjective: 'bárbaro',
+  leader: '—',
+  leaderTitle: '',
+  color: '#3b3b3b',
+  secondaryColor: '#e74c3c',
+  ability: { name: '—', description: '' },
+  cityNames: [],
+};
+
+export const CIV_BY_ID: Record<string, CivDef> = Object.fromEntries([...CIVS, BARBARIAN_CIV].map((c) => [c.id, c]));

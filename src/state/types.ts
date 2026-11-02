@@ -46,6 +46,21 @@ export interface Unit {
   skipped?: boolean;
   /** Cargas restantes (construtores). */
   charges?: number;
+  /** Vida (0–100). */
+  hp: number;
+  xp: number;
+  promotions: string[];
+  /** Agiu neste turno (moveu/atacou/construiu): não se cura. */
+  acted?: boolean;
+  /** Acampamento bárbaro de origem. */
+  campId?: number;
+}
+
+export interface BarbarianCamp {
+  id: number;
+  pos: number;
+  /** Turnos até gerar a próxima unidade. */
+  spawnTimer: number;
 }
 
 export interface ProductionItem {
@@ -77,12 +92,16 @@ export interface City {
   cultureStored: number;
   /** Quantos hexágonos a cidade já ganhou por cultura. */
   cultureTiles: number;
+  hp: number;
+  /** Já usou o ataque à distância neste turno. */
+  rangedUsed?: boolean;
 }
 
 export interface Player {
   id: number;
   civId: string;
   isHuman: boolean;
+  isBarbarian?: boolean;
   /** 1 = hexágono já explorado. Mesmo tamanho de map.tiles. */
   explored: number[];
   /** Quantas cidades já foram fundadas (para escolher o próximo nome). */
@@ -123,5 +142,8 @@ export interface GameState {
   players: Player[];
   units: Unit[];
   cities: City[];
+  camps: BarbarianCamp[];
   nextId: number;
+  /** Contador para sorteios de combate/IA determinísticos. */
+  rngCounter: number;
 }

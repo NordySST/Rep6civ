@@ -2,6 +2,7 @@ import { CIV_BY_ID } from '../data/civs';
 import type { ImprovementId } from '../data/improvements';
 import { RESOURCE_BY_ID } from '../data/resources';
 import { TERRAINS } from '../data/terrains';
+import { PROMOTION_XP } from '../data/promotions';
 import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
 import type { GameState, Tile } from '../state/types';
@@ -28,6 +29,10 @@ export interface Overlay {
     workable: number[];
     buyable: Map<number, number>;
   };
+  /** Hexágonos atacáveis pela seleção atual. */
+  attackTargets?: Set<number>;
+  /** Alvo com ataque pendente de confirmação. */
+  pendingAttack?: number;
   /** Informação de cidades para os estandartes (crescimento/produção). */
   cityInfo?: Map<number, { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number }>;
 }
@@ -205,6 +210,25 @@ export class Renderer {
       }
     }
 
+    // acampamentos bárbaros conhecidos
+    for (const c of state.camps) {
+      if (!isKnown(c.pos)) continue;
+      this.drawCamp(tileCenter(state, c.pos));
+    }
+
+    // alvos de ataque
+    if (overlay.attackTargets?.size) {
+      for (const i of overlay.attackTargets) {
+        const { x, y } = tileCenter(state, i);
+        ctx.strokeStyle = i === overlay.pendingAttack ? '#ff3b30' : 'rgba(255, 80, 60, 0.85)';
+        ctx.lineWidth = i === overlay.pendingAttack ? 4 : 2.5;
+        ctx.fillStyle = 'rgba(255, 60, 40, 0.16)';
+        hexPath(ctx, x, y, HEX_SIZE - 3);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
     // fronteiras (acima da névoa e do destaque de alcance)
     this.drawBorders(state, visibleIdx);
 
@@ -226,6 +250,10 @@ export class Renderer {
     for (const c of state.cities) {
       if (!isKnown(c.pos)) continue;
       this.drawCity(state, c.pos, c.name, c.population, c.owner, c.isCapital, overlay.cityInfo?.get(c.id));
+      if (c.hp < 200 + (c.buildings.includes('walls') ? 100 : 0)) {
+        const { x, y } = tileCenter(state, c.pos);
+        this.drawHpBar(x, y + 18, 34, c.hp / (200 + (c.buildings.includes('walls') ? 100 : 0)));
+      }
     }
 
     // unidades (de outros jogadores só se visíveis)
@@ -241,7 +269,16 @@ export class Renderer {
       units.sort((a, b) => (UNITS[a.type].class === 'civilian' ? -1 : 1) - (UNITS[b.type].class === 'civilian' ? -1 : 1));
       units.forEach((u, k) => {
         const off = units.length > 1 ? (k === 0 ? -9 : 9) : 0;
-        this.drawUnit(state, u.type, u.owner, x + off, y + (units.length > 1 ? 4 : 2), u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+        const ux = x + off;
+        const uy = y + (units.length > 1 ? 4 : 2);
+        this.drawUnit(state, u.type, u.owner, ux, uy, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+        if (u.hp < 100) this.drawHpBar(ux, uy + 16, 22, u.hp / 100);
+        if (u.owner === playerId && UNITS[u.type].combat && u.promotions.length < PROMOTION_XP.length && u.xp >= PROMOTION_XP[u.promotions.length]) {
+          ctx.fillStyle = '#ffd23f';
+          ctx.font = '700 11px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('★', ux - 11, uy - 10);
+        }
       });
     }
 
@@ -444,6 +481,41 @@ export class Renderer {
       }
       ctx.stroke();
     }
+  }
+
+  private drawHpBar(x: number, y: number, w: number, frac: number): void {
+    const { ctx } = this;
+    const f = Math.max(0, Math.min(1, frac));
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(x - w / 2 - 1, y - 1, w + 2, 5);
+    ctx.fillStyle = f > 0.6 ? '#4cd964' : f > 0.3 ? '#ffcc00' : '#ff3b30';
+    ctx.fillRect(x - w / 2, y, w * f, 3);
+  }
+
+  private drawCamp(c: { x: number; y: number }): void {
+    const { ctx } = this;
+    ctx.fillStyle = '#6b4a2b';
+    ctx.strokeStyle = '#2b1a0c';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(c.x - 14, c.y + 12);
+    ctx.lineTo(c.x - 2, c.y - 8);
+    ctx.lineTo(c.x + 10, c.y + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = '#2b1a0c';
+    ctx.beginPath();
+    ctx.moveTo(c.x + 12, c.y + 12);
+    ctx.lineTo(c.x + 12, c.y - 14);
+    ctx.stroke();
+    ctx.fillStyle = '#c0392b';
+    ctx.beginPath();
+    ctx.moveTo(c.x + 12, c.y - 14);
+    ctx.lineTo(c.x + 22, c.y - 10);
+    ctx.lineTo(c.x + 12, c.y - 6);
+    ctx.closePath();
+    ctx.fill();
   }
 
   private drawRoads(state: GameState, idxs: number[], isKnown: (i: number) => boolean): void {
