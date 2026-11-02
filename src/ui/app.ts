@@ -946,10 +946,39 @@ export class App {
       this.reachable = undefined;
       const c = this.selectedCity();
       this.selectedTile = c?.pos;
-      if (center && c) this.centerOn(c.pos);
+      this.renderHud();
+      // enquadra os hexágonos de trabalho no espaço livre acima do painel
+      if (c) this.frameCity(c.pos, center);
+      this.invalidate();
+      return;
     }
     this.renderHud();
     this.invalidate();
+  }
+
+  /** Centraliza a cidade entre a barra superior e o painel e ajusta o zoom para o raio 3. */
+  private frameCity(pos: number, force: boolean): void {
+    if (!this.state) return;
+    const vh = this.view.vh;
+    const vw = this.view.vw;
+    const top = this.el.topbar.getBoundingClientRect().bottom + 8;
+    const panelTop = this.el.panel.getBoundingClientRect().top - 8;
+    const bottom = Math.max(top + 120, Math.min(vh, panelTop));
+    const free = bottom - top;
+    // raio 3 ≈ 7 hexágonos de largura (≈ 390 de mundo) e ≈ 340 de altura
+    const zoomW = vw / 400;
+    const k = this.view.panScale({ ...this.cam, zoom: 1 });
+    const zoomH = free / (340 / k.y);
+    const zoom = Math.max(0.55, Math.min(1.6, Math.min(zoomW, zoomH)));
+    const c = tileCenter(this.state, pos);
+    const scale = this.view.panScale({ ...this.cam, zoom });
+    const dy = ((top + bottom) / 2 - vh / 2) * scale.y;
+    const target = { x: c.x, y: c.y - dy, zoom };
+    // só move se a cidade não estiver bem enquadrada (ou se pedido)
+    const p = this.view.tileToScreen(this.state, this.cam, pos);
+    if (force || p.y < top + free * 0.2 || p.y > bottom - free * 0.2 || p.x < vw * 0.15 || p.x > vw * 0.85 || Math.abs(this.cam.zoom - zoom) > 0.35) {
+      this.moveCamera(this.clampCam(target), 380);
+    }
   }
 
   private startNewGame(
@@ -1390,6 +1419,7 @@ export class App {
     else if (u) this.el.panel.append(this.unitPanel(u));
     else if (this.selectedTile !== undefined) this.el.panel.append(this.tilePanel(this.selectedTile));
     else if (waiting.length) this.el.panel.append(h('p', { class: 'muted' }, T.unitsWaiting(waiting.length)));
+    this.el.panel.classList.toggle('city-mode', !!city && !this.placement);
   }
 
   private unitPanel(u: Unit): HTMLElement {

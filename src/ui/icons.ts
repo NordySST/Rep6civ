@@ -31,9 +31,9 @@ const P: Record<string, string> = {
   check: 'M9 16.2l-4.2-4.2L3.4 13.4 9 19 21 7l-1.4-1.4z',
   lock: 'M7 10V7a5 5 0 0110 0v3h1.5v12h-13V10zm2 0h6V7a3 3 0 00-6 0z',
   target: 'M12 2a10 10 0 110 20 10 10 0 010-20zm0 3a7 7 0 100 14 7 7 0 000-14zm0 3a4 4 0 110 8 4 4 0 010-8zm0 2.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
-  diplomacy: 'M2 11l4-4 3 1 3-2 3 2 3-1 4 4-3 3-2-1-4 4a1.5 1.5 0 01-2.1 0L9 16.2l-1.6 1.6a1.4 1.4 0 01-2-2L7 14.2 5 13zm7.3 2.2l3.3 3.3 3.6-3.6-2.9-2.9-1.6 1L9.6 10z',
+  diplomacy: 'S:M1.5 12.5l4-5 3 1.2M22.5 12.5l-4-5-3 1.2M8.5 8.7l3.2-1.6 3.8 1.6-3.6 2.4c-.9.6-2 .3-2.4-.6M5.5 7.5l-1.5 6.5 3 3M18.5 7.5l1.5 6.5-6.5 5.5c-.6.5-1.4.4-1.9-.1L8 16.4M10 18l1.5-1.5M8.3 16.3l1.7-1.7M15.5 13l2.5 2.5M13.5 14.8l2.3 2.3',
   menu: 'M3 5h18v2.5H3zm0 5.75h18v2.5H3zM3 16.5h18V19H3z',
-  strength: 'M3 3h3l7 7-2 2-3-3v3H6V9zm18 0v3l-9.3 9.3 1.4 1.4 1.4-1.4 2.1 2.1-1.4 1.4L17 21l-2 2-3.5-3.5L8 23l-2-2 3.5-3.5L6 14l2-2 1.4 1.4 1.4-1.4L18 6z',
+  strength: 'S:M4 4l12.5 12.5M20 4L7.5 16.5M13.5 18.5l5-5M10.5 18.5l-5-5M17 17l3 3M7 17l-3 3',
   ranged: 'M5 21l-2-2L16.6 5.4H14V3h7v7h-2.4V7.4zM6 3a15 15 0 0115 15h-2A13 13 0 006 5z',
   health: 'M12 21s-8-5.3-8-11a4.6 4.6 0 018-3 4.6 4.6 0 018 3c0 5.7-8 11-8 11z',
   shield: 'M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z',
@@ -69,7 +69,11 @@ export type IconName = keyof typeof P;
 
 export function iconSvg(name: string, cls = ''): string {
   const d = P[name] ?? P.resource;
-  return `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
+  // "S:" = ícone de traço (linhas com espessura), mais legível para formas finas
+  const path = d.startsWith('S:')
+    ? `<path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="${d.slice(2)}"/>`
+    : `<path fill="currentColor" d="${d}"/>`;
+  return `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
 }
 
 /** Elemento <span> com o ícone (para usar com `h`). */

@@ -538,6 +538,22 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   (`toast`) também — novos textos podem continuar usando emojis nos `strings.ts`/dados; o que
   não estiver na tabela aparece como está. O mapa (canvas) mantém seus glifos.
 
+### Ajustes pós-visual
+
+- Visão da cidade: ao abrir uma cidade, `App.frameCity` enquadra o raio de trabalho no espaço
+  livre entre a barra superior e o painel (zoom e deslocamento pela `panScale` da visão); no
+  celular em pé o painel da cidade fica mais baixo (`.panel.city-mode`, 34vh). No 3D os
+  rendimentos, cidadãos e preços ficam em pé (`drawSprites`), acima de árvores e casas; o
+  chão mostra só o destaque e o contorno dos hexágonos trabalhados (amarelo = fixado).
+- Ícones de traço (`'S:'` no início do caminho em `icons.ts`): aperto de mãos (diplomacia)
+  e espadas cruzadas (força).
+- Unidades que eram procedurais agora usam personagens da Quaternius (CC0, recoloridos:
+  pele, olhos, roupa na cor da equipe): missionário (quimono), apóstolo (mago com auréola),
+  inquisidor (mago de manto escuro), grandes personalidades (rei), construtor (trabalhador),
+  colono (fazendeiro) e mercador (senhor de cartola) com a carroça. Catapulta (com dois
+  operadores) e encouraçado ganharam modelos procedurais detalhados. `soldier()` aceita outro
+  corpo (`bodyName`) e usa a mão disponível (`Palm`/`Fist`/`Hand`).
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),

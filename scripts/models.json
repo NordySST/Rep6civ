@@ -222,5 +222,236 @@
     0.5
    ]
   }
+ },
+ "monk": {
+  "file": "UltimateAnimatedCharacter/SK_KimonoMale.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    70,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -70,
+    0
+   ]
+  },
+  "attach": [
+   "Fist_R",
+   "Fist_L",
+   "Head"
+  ],
+  "tint": [
+   "Clothes"
+  ],
+  "recolor": {
+   "Skin": [
+    0.62,
+    0.36,
+    0.24
+   ],
+   "Face": [
+    0.03,
+    0.02,
+    0.02
+   ]
+  }
+ },
+ "wizard": {
+  "file": "UltimateAnimatedCharacter/SK_Wizard.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    70,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -70,
+    0
+   ]
+  },
+  "attach": [
+   "Fist_R",
+   "Fist_L",
+   "Head"
+  ],
+  "tint": [
+   "Clothes"
+  ],
+  "recolor": {
+   "Skin": [
+    0.62,
+    0.36,
+    0.24
+   ],
+   "Face": [
+    0.03,
+    0.02,
+    0.02
+   ]
+  }
+ },
+ "inquisitor": {
+  "file": "UltimateAnimatedCharacter/SK_Wizard.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    70,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -70,
+    0
+   ]
+  },
+  "attach": [
+   "Fist_R",
+   "Fist_L",
+   "Head"
+  ],
+  "team": [
+   "Belt"
+  ],
+  "recolor": {
+   "Skin": [
+    0.62,
+    0.36,
+    0.24
+   ],
+   "Face": [
+    0.03,
+    0.02,
+    0.02
+   ],
+   "Clothes": [
+    0.03,
+    0.008,
+    0.008
+   ],
+   "Hat": [
+    0.012,
+    0.012,
+    0.014
+   ]
+  }
+ },
+ "worker": {
+  "file": "UltimateAnimatedCharacter/SK_WorkerMale.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    70,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -70,
+    0
+   ]
+  },
+  "attach": [
+   "Fist_R",
+   "Fist_L",
+   "Head"
+  ],
+  "tint": [
+   "Vest"
+  ],
+  "recolor": {
+   "Skin": [
+    0.62,
+    0.36,
+    0.24
+   ],
+   "Face": [
+    0.03,
+    0.02,
+    0.02
+   ]
+  }
+ },
+ "merchant": {
+  "file": "UltimateAnimatedCharacter/SK_OldClassyMale.usda",
+  "pose": {
+   "UpperArm_L": [
+    0,
+    70,
+    0
+   ],
+   "UpperArm_R": [
+    0,
+    -70,
+    0
+   ]
+  },
+  "attach": [
+   "Fist_R",
+   "Fist_L",
+   "Head"
+  ],
+  "tint": [
+   "Detail"
+  ],
+  "recolor": {
+   "Skin": [
+    0.62,
+    0.36,
+    0.24
+   ],
+   "Face": [
+    0.03,
+    0.02,
+    0.02
+   ]
+  }
+ },
+ "king": {
+  "file": "UltimateModularCharacters/SK_King.usda",
+  "pose": {
+   "UpperArm_L": [
+    -70,
+    0,
+    0
+   ],
+   "UpperArm_R": [
+    -70,
+    0,
+    0
+   ]
+  },
+  "attach": [
+   "Hand_R",
+   "Hand_L",
+   "Head"
+  ],
+  "team": [
+   "Blue"
+  ]
+ },
+ "farmer": {
+  "file": "UltimateModularCharacters/SK_Farmer.usda",
+  "pose": {
+   "UpperArm_L": [
+    -70,
+    0,
+    0
+   ],
+   "UpperArm_R": [
+    -70,
+    0,
+    0
+   ]
+  },
+  "attach": [
+   "Hand_R",
+   "Hand_L",
+   "Head"
+  ],
+  "team": [
+   "Red"
+  ]
  }
 }

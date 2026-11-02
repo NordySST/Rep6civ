@@ -742,3 +742,7 @@ html, body { font-family: var(--font-body); font-size: 16px; }
 .btn .ic { width: 1.2em; height: 1.2em; }
 .btn.primary .icw { color: inherit; }
 .btn.primary .icw .ic { filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.35)); }
+/* painel da cidade mais baixo no celular em pé: o mapa da cidade fica visível */
+@media (orientation: portrait) {
+  .panel.city-mode { max-height: 34vh; }
+}
