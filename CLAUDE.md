@@ -26,7 +26,8 @@ Pré-requisito (uma vez): Settings → Pages → Source = **GitHub Actions**.
 ```
 src/
   data/    Definições de conteúdo (terrenos, características, recursos, maravilhas, unidades,
-           edifícios, melhorias, civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
+           edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas,
+           civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
   state/   Tipos do estado serializável (types.ts), versão do esquema (version.ts) e
            salvar/carregar com migrações (save.ts).
   rules/   Regras PURAS, sem DOM: hex.ts (geometria), rng.ts/noise.ts (aleatoriedade com semente),
@@ -34,6 +35,8 @@ src/
            (custos, A*, alcance, estradas), visibility.ts (névoa), city.ts (fundar),
            cities.ts (gestão: rendimentos, cidadãos, crescimento, moradia, produção, cultura,
            fronteiras, compras), builders.ts (melhorias, estradas, remoção de características),
+           research.ts (tecnologias, cívicas, eurecas/inspirações), effects.ts (governo,
+           políticas e agregação de modificadores),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom) e renderer.ts (arte procedural).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
@@ -42,7 +45,7 @@ src/
   main.ts  Ponto de entrada; registra o service worker em produção.
 public/    manifest.webmanifest, sw.js (offline), ícones.
 tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save, cidades,
-           construtores). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
+           construtores, pesquisa/políticas). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
 ```
 
 ### Convenções
@@ -106,6 +109,30 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   Recursos com `improvement` só aceitam aquela melhoria. Derrubar floresta (+20) / selva
   (+15) adiciona produção ao item atual da cidade dona.
 - Selva só existe sobre planície (o gerador converte pradaria em planície ao pôr selva).
+- Cidadãos geram +1 ciência a cada 2 de população e +1 cultura a cada 3.
+
+### Ciência, cultura e governo (etapa 3)
+
+- Árvores em `data/techs.ts` (18 tecnologias, Antiga→Medieval) e `data/civics.ts` (10 cívicas).
+  A ciência/cultura do turno vai para o estoque do jogador (`player.science/culture`) e flui
+  inteira para o item atual; o excedente fica no estoque para o próximo. Sem item escolhido,
+  o estoque acumula. O botão de turno pede "Escolher pesquisa/cívica" quando há cidade.
+- Eureca/inspiração (`data/boosts.ts`): condições declarativas (`cities`, `improvements`,
+  `buildings`, `units`, `roads`, `population`, `gold`, `naturalWonderSeen`, `explored`,
+  `territory`…) checadas após cada ação e no fim do turno; reduzem o custo em 40%.
+- Desbloqueios: `requiresTech` em edifícios e melhorias. Recursos com `revealedBy` ficam
+  invisíveis (sem rendimento, sem melhoria, sem ícone) até a tecnologia
+  (`visibleResource(t, techs)`; `techs` indefinido = tudo visível, usado em mapgen/testes).
+  Carvão, petróleo, alumínio e urânio dependem de tecnologias de eras futuras (ainda ocultos).
+- Governo: começa sem governo; Código de Leis adota Chefia automaticamente. Filosofia
+  Política libera Autocracia, Oligarquia e República Clássica. Espaços: militar, econômico,
+  coringa (aceita qualquer). Governo/políticas só podem mudar no turno em que uma cívica é
+  concluída (`policyChangeAvailable`); a UI sugere "Definir políticas" se houver espaço vazio.
+- Efeitos genéricos (`Effect` em `data/governments.ts`): `cityYields`, `capitalYields`,
+  `yieldPercent`, `productionPercent` (militar/edifício/colono/construtor/todos),
+  `tilePurchaseDiscount`, `builderCharges`, `growthPercent`, `extraMoves`. Agregados em
+  `rules/effects.ts` e aplicados em `cityYields`, produção, crescimento, compra de hexágonos,
+  cargas de construtor e `maxMoves`.
 
 ## Plano das 8 etapas
 
@@ -116,7 +143,7 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
 2. **[CONCLUÍDA] Cidades e território** — crescimento populacional, comida/produção, trabalho de hexágonos,
    fila de produção (unidades e edifícios), expansão cultural de fronteiras, compra de hexágonos,
    construtores e melhorias (fazenda, mina, pastagem…), estradas, painel da cidade.
-3. **Ciência e cultura** — árvore de tecnologias e de cívicas, revelação de recursos estratégicos
+3. **[CONCLUÍDA] Ciência e cultura** — árvore de tecnologias e de cívicas, revelação de recursos estratégicos
    (`revealedBy`), governos e cartas de política, eurekas/inspirações.
 4. **Combate** — força, dano, ZOC, bônus de terreno/rio/fortificação, unidades à distância,
    promoções, acampamentos bárbaros, captura de cidades, muralhas.
@@ -130,6 +157,17 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 3 (concluída)
+- Save v3 (migração 2→3: pesquisa, cívicas, eurecas, governo e políticas no jogador).
+- Dados: 18 tecnologias, 10 cívicas, 4 governos, 13 políticas, condições de eureca/inspiração.
+- Regras: pesquisa com estoque e excedente, eurecas/inspirações, desbloqueio de edifícios e
+  melhorias, revelação de recursos estratégicos, governos e espaços, efeitos de políticas.
+- UI: modais de Tecnologias e Cívicas por nível (estado, custo, turnos, pré-requisitos,
+  eureca), modal de Governo e políticas (seleção por espaço), botões 🔬/🎭 na barra
+  superior, avisos de conclusão/eureca, melhorias bloqueadas mostram a tecnologia exigida.
+- Pendências: unidades liberadas por tecnologia entram com o combate (etapa 4); eras
+  posteriores da árvore (etapa 8); troca de políticas paga em ouro não existe.
 
 ### Etapa 2 (concluída)
 - Esquema do save v2 (migração 1→2 + `normalizeState` ao carregar).

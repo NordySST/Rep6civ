@@ -59,6 +59,23 @@ export const MIGRATIONS: MigrationTable = {
     })),
     units: s.units.map((u: any) => (u.type === 'builder' && u.charges === undefined ? { ...u, charges: 3 } : u)),
   }),
+  // v2 → v3 (etapa 3): pesquisa, cívicas, governo e políticas.
+  2: (s) => ({
+    ...s,
+    players: s.players.map((p: any) => ({
+      techs: [],
+      researching: null,
+      techProgress: {},
+      civics: [],
+      researchingCivic: null,
+      civicProgress: {},
+      boosts: [],
+      government: null,
+      policies: [],
+      policyChangeAvailable: false,
+      ...p,
+    })),
+  }),
 };
 
 export class SaveError extends Error {}

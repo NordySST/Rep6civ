@@ -47,13 +47,25 @@ export function isCoastalLand(map: GameMap, idx: number): boolean {
   return false;
 }
 
-export function tileYields(t: Tile): Yields {
+/**
+ * Recurso visível para quem conhece `techs`. Recursos com `revealedBy` ficam
+ * ocultos (sem rendimento, sem melhoria) até a tecnologia. `techs` indefinido = tudo visível.
+ */
+export function visibleResource(t: Tile, techs?: readonly string[]): string | undefined {
+  if (!t.resource) return undefined;
+  const r = RESOURCE_BY_ID[t.resource];
+  if (techs && r?.revealedBy && !techs.includes(r.revealedBy)) return undefined;
+  return t.resource;
+}
+
+export function tileYields(t: Tile, techs?: readonly string[]): Yields {
   const y = emptyYields();
   addYields(y, TERRAINS[t.terrain].yields);
   if (t.hills) addYields(y, HILLS.yields);
   if (t.feature) addYields(y, FEATURES[t.feature].yields);
   if (t.rivers) addYields(y, RIVER.yields);
-  if (t.resource) addYields(y, RESOURCE_BY_ID[t.resource]?.yields);
+  const res = visibleResource(t, techs);
+  if (res) addYields(y, RESOURCE_BY_ID[res]?.yields);
   if (t.wonder) addYields(y, WONDER_BY_ID[t.wonder]?.yields);
   if (t.improvement) addYields(y, IMPROVEMENTS[t.improvement as ImprovementId]?.yields);
   return y;

@@ -1,6 +1,7 @@
 import { ROAD_MOVE_COST } from '../data/improvements';
 import { UNITS } from '../data/units';
 import type { GameState, Unit } from '../state/types';
+import { modifiersFor } from './effects';
 import { directionTo, distance, neighbor } from './hex';
 import { enterCost, isPassableLand, riverOnEdge } from './tiles';
 
@@ -24,6 +25,11 @@ export function stepCost(state: GameState, from: number, to: number): number {
   if (hasRoad(state, from) && hasRoad(state, to)) return ROAD_MOVE_COST;
   if (riverOnEdge(map.tiles[from], dir)) return Math.max(base, RIVER_CROSSING_COST);
   return base;
+}
+
+/** Movimento máximo da unidade (definição + bônus de políticas). */
+export function maxMoves(state: GameState, unit: Unit): number {
+  return UNITS[unit.type].moves + (modifiersFor(state, unit.owner).extraMoves[unit.type] ?? 0);
 }
 
 export function hasRoad(state: GameState, idx: number): boolean {
@@ -111,7 +117,7 @@ export interface PathResult {
  * se pode entrar com qualquer movimento restante. Retorna o nº de turnos.
  */
 export function simulateTurns(state: GameState, unit: Unit, path: number[]): number {
-  const max = UNITS[unit.type].moves;
+  const max = maxMoves(state, unit);
   let left = unit.movesLeft;
   let turns = 1;
   let pos = unit.pos;
@@ -136,7 +142,7 @@ export function findPath(state: GameState, unit: Unit, target: number): PathResu
   const explored = state.players[unit.owner]?.explored;
   const known = (i: number) => !explored || explored[i] === 1;
   if (known(target) && !canOccupy(state, unit, target)) return null;
-  const max = UNITS[unit.type].moves;
+  const max = maxMoves(state, unit);
 
   const g = new Map<number, number>([[unit.pos, 0]]);
   const prev = new Map<number, number>();

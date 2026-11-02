@@ -34,6 +34,16 @@ export function newGame(opts: NewGameOptions): GameState {
     science: 0,
     culture: 0,
     faith: 0,
+    techs: [],
+    researching: null,
+    techProgress: {},
+    civics: [],
+    researchingCivic: null,
+    civicProgress: {},
+    boosts: [],
+    government: null,
+    policies: [],
+    policyChangeAvailable: false,
   };
   const state: GameState = {
     schemaVersion: SCHEMA_VERSION,

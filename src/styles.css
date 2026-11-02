@@ -300,3 +300,69 @@ input[type='text'] {
   border-radius: 10px;
   padding-left: 12px;
 }
+
+/* ---------- etapa 3: árvores, governo ---------- */
+.res-btn {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.res-btn:hover { background: var(--btn-hover); }
+.tree-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--gap); }
+.tree-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: #1a222c;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tree-card small { color: var(--muted); }
+.tree-card:disabled { cursor: default; opacity: 0.6; }
+.tree-card.available:not(:disabled) { background: var(--btn); border-color: #4e6a85; }
+.tree-card.available:not(:disabled):hover { background: var(--btn-hover); }
+.tree-card.done { opacity: 0.75; border-color: #2e7d32; }
+.tree-card.current { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; opacity: 1; }
+.tree-card .boost { color: #9ec5ff; }
+.tree-card .boost.ok { color: #7cfc8a; }
+.tree-card .bar { display: block; width: 100%; height: 5px; background: #0c1117; border-radius: 3px; margin-top: 4px; }
+.tree-card .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.slot-row { display: flex; gap: var(--gap); align-items: center; }
+.slot-tag {
+  flex: none;
+  min-width: 92px;
+  text-align: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.slot-tag.military { background: #7b2d26; }
+.slot-tag.economic { background: #7a5b12; }
+.slot-tag.wildcard { background: #4b2d74; }
+.policy-select {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: #0c1117;
+  color: var(--text);
+  font: inherit;
+  padding: 0 8px;
+}
+.form .hint { color: var(--accent); }
