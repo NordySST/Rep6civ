@@ -1,4 +1,6 @@
+import { BUILDINGS } from '../data/buildings';
 import { CIV_BY_ID } from '../data/civs';
+import { FEATURE_REMOVAL, IMPROVEMENTS } from '../data/improvements';
 import { RESOURCE_BY_ID, RESOURCE_KIND_LABEL } from '../data/resources';
 import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
@@ -6,6 +8,29 @@ import { YIELD_KEYS, YIELD_LABELS } from '../data/yields';
 import { clampCamera, clampZoom, type Camera, zoomAt } from '../render/camera';
 import { Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
 import { applyAction, unitsNeedingOrders, type Action } from '../rules/actions';
+import { availableImprovements, canBuildRoad, canRemoveFeature } from '../rules/builders';
+import {
+  borderThreshold,
+  cannotProduce,
+  cityHousing,
+  cityYields,
+  citiesNeedingProduction,
+  expansionCandidates,
+  FOCUS_LABELS,
+  foodSurplus,
+  growthThreshold,
+  itemCost,
+  itemKey,
+  itemName,
+  normalizeState,
+  playerIncome,
+  productionOptions,
+  purchaseCost,
+  tilePurchaseCost,
+  turnsToGrow,
+  turnsToProduce,
+  workableTiles,
+} from '../rules/cities';
 import { canFoundCity } from '../rules/city';
 import { newGame, turnYear } from '../rules/game';
 import { findPath, reachableThisTurn } from '../rules/movement';
@@ -13,11 +38,13 @@ import { describeTile, isPassableLand, tileYields } from '../rules/tiles';
 import { computeVisibility } from '../rules/visibility';
 import { screenToWorld } from '../render/camera';
 import { AUTOSAVE_SLOT, loadFromSlot, readSlotInfo, saveToSlot, SaveError } from '../state/save';
-import type { GameState, Unit } from '../state/types';
+import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/types';
 import { clear, h } from './dom';
 import { attachInput } from './input';
 import { closeModal, newGameForm, openModal, slotList } from './menus';
 import { T } from './strings';
+
+const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 /**
  * Controlador da interface: guarda o estado atual do jogo, a câmera e a seleção,
@@ -30,6 +57,8 @@ export class App {
   private vis: Uint8Array = new Uint8Array(0);
   private selectedUnitId: number | undefined;
   private selectedTile: number | undefined;
+  private selectedCityId: number | undefined;
+  private pendingBuyTile: number | undefined;
   private pendingPath: { target: number; path: number[]; turns: number } | undefined;
   private reachable: Set<number> | undefined;
   private revealAll = false;
@@ -94,6 +123,8 @@ export class App {
         path: this.pendingPath?.path ?? this.selectedUnit()?.path,
         pathTurns: this.pendingPath?.turns ?? this.pathTurnsForSelected(),
         revealAll: this.revealAll,
+        cityView: this.cityViewOverlay(),
+        cityInfo: this.cityInfo(),
       };
       this.renderer.draw(this.state, this.cam, this.vis, overlay);
     }
@@ -134,10 +165,80 @@ export class App {
       if (ev.type === 'error') {
         this.toast(ev.message);
         ok = false;
-      } else if (ev.type === 'cityFounded') this.toast(T.cityFounded(ev.name));
+      }
     }
-    if (ok) this.setState(state);
+    if (ok) {
+      this.setState(state);
+      const msgs = events.map((ev) => this.eventMessage(ev, state)).filter((m): m is string => !!m);
+      if (msgs.length) this.toast(msgs.slice(0, 3).join('\n') + (msgs.length > 3 ? `\n(+${msgs.length - 3})` : ''));
+    }
     return ok;
+  }
+
+  private eventMessage(ev: ReturnType<typeof applyAction>['events'][number], s: GameState): string | null {
+    const cname = (id: number) => s.cities.find((c) => c.id === id)?.name ?? '';
+    switch (ev.type) {
+      case 'cityFounded':
+        return T.cityFounded(ev.name);
+      case 'produced':
+        return s.cities.find((c) => c.id === ev.cityId)?.owner === s.currentPlayer ? T.produced(cname(ev.cityId), itemName(ev.item)) : null;
+      case 'grew':
+        return T.grew(cname(ev.cityId), ev.population);
+      case 'starved':
+        return T.starved(cname(ev.cityId), ev.population);
+      case 'borderGrew':
+        return T.borderGrew(cname(ev.cityId));
+      case 'info':
+        return ev.message;
+      default:
+        return null;
+    }
+  }
+
+  private selectedCity(): City | undefined {
+    return this.state?.cities.find((c) => c.id === this.selectedCityId);
+  }
+
+  private cityViewOverlay(): Overlay['cityView'] {
+    const s = this.state;
+    const c = this.selectedCity();
+    if (!s || !c) return undefined;
+    const buyable = new Map<number, number>();
+    const explored = s.players[s.currentPlayer].explored;
+    for (const i of expansionCandidates(s, c)) if (this.revealAll || explored[i]) buyable.set(i, tilePurchaseCost(s, c, i));
+    return { cityId: c.id, worked: new Set(c.worked), locked: new Set(c.locked), workable: workableTiles(s, c), buyable };
+  }
+
+  private cityInfo(): Overlay['cityInfo'] {
+    const s = this.state;
+    if (!s) return undefined;
+    const m: NonNullable<Overlay['cityInfo']> = new Map();
+    for (const c of s.cities) {
+      if (c.owner !== s.currentPlayer) continue;
+      const item = c.queue[0];
+      m.set(c.id, {
+        growTurns: turnsToGrow(s, c),
+        prodName: item ? itemName(item) : undefined,
+        prodTurns: item ? turnsToProduce(s, c, item) : undefined,
+        prodFrac: item ? (c.progress[itemKey(item)] ?? 0) / Math.max(1, itemCost(item)) : 0,
+      });
+    }
+    return m;
+  }
+
+  private selectCity(id: number | undefined, center = false): void {
+    this.selectedCityId = id;
+    this.pendingBuyTile = undefined;
+    if (id !== undefined) {
+      this.selectedUnitId = undefined;
+      this.pendingPath = undefined;
+      this.reachable = undefined;
+      const c = this.selectedCity();
+      this.selectedTile = c?.pos;
+      if (center && c) this.centerOn(c.pos);
+    }
+    this.renderHud();
+    this.invalidate();
   }
 
   private startNewGame(seed: string, mapSize: GameState['settings']['mapSize'], civId: string): void {
@@ -184,6 +285,10 @@ export class App {
 
   private selectUnit(id: number | undefined, center = false): void {
     this.selectedUnitId = id;
+    if (id !== undefined) {
+      this.selectedCityId = undefined;
+      this.pendingBuyTile = undefined;
+    }
     this.pendingPath = undefined;
     const u = this.selectedUnit();
     this.selectedTile = u?.pos;
@@ -208,6 +313,12 @@ export class App {
 
   private onEndTurnButton(): void {
     if (!this.state) return;
+    const needProd = citiesNeedingProduction(this.state, this.state.currentPlayer);
+    if (needProd.length) {
+      this.selectCity(needProd[0].id, true);
+      this.showProduction();
+      return;
+    }
     const waiting = unitsNeedingOrders(this.state, this.state.currentPlayer);
     if (waiting.length === 0) return this.endTurn();
     const selId = this.selectedUnitId;
@@ -223,6 +334,7 @@ export class App {
     if (!this.dispatch({ type: 'endTurn' }) || !this.state) return;
     this.toast(`${T.turn} ${this.state.turn} · ${turnYear(this.state.turn)}`);
     this.autosave();
+    this.selectedCityId = undefined;
     if (!this.selectNextUnit()) this.selectUnit(undefined);
   }
 
@@ -236,6 +348,24 @@ export class App {
     const s = this.state;
     const me = s.currentPlayer;
     const sel = this.selectedUnit();
+
+    // visão da cidade: fixar cidadãos / comprar hexágonos
+    const city = this.selectedCity();
+    if (city && idx !== city.pos) {
+      if (workableTiles(s, city).includes(idx)) {
+        this.dispatch({ type: 'toggleTile', cityId: city.id, tile: idx });
+        this.pendingBuyTile = undefined;
+        this.renderHud();
+        return;
+      }
+      if (expansionCandidates(s, city).includes(idx) && s.players[me].explored[idx]) {
+        this.pendingBuyTile = idx;
+        this.selectedTile = idx;
+        this.renderHud();
+        this.invalidate();
+        return;
+      }
+    }
 
     // confirmação de movimento: segundo toque no mesmo destino
     if (sel && this.pendingPath && this.pendingPath.target === idx) {
@@ -251,11 +381,20 @@ export class App {
     }
 
     const mine = s.units.filter((u) => u.pos === idx && u.owner === me);
-    if (mine.length) {
-      // alterna entre unidades empilhadas no mesmo hexágono
-      const cur = mine.findIndex((u) => u.id === this.selectedUnitId);
-      const next = mine[(cur + 1) % mine.length];
-      this.selectUnit(next.id);
+    const myCity = s.cities.find((c) => c.pos === idx && c.owner === me);
+    if (mine.length || myCity) {
+      // alterna entre unidades empilhadas e a cidade no mesmo hexágono
+      const cycle: ({ unit: number } | { city: number })[] = [
+        ...mine.map((u) => ({ unit: u.id })),
+        ...(myCity ? [{ city: myCity.id }] : []),
+      ];
+      const cur = cycle.findIndex((c) =>
+        'unit' in c ? c.unit === this.selectedUnitId : c.city === this.selectedCityId,
+      );
+      // tocar na cidade abre a cidade primeiro se nada estiver selecionado ali
+      const next = cur < 0 && myCity && !sel ? { city: myCity.id } : cycle[(cur + 1) % cycle.length];
+      if ('unit' in next) this.selectUnit(next.unit);
+      else this.selectCity(next.city);
       return;
     }
 
@@ -272,6 +411,8 @@ export class App {
 
     // apenas inspeciona o hexágono
     this.pendingPath = undefined;
+    this.selectedCityId = undefined;
+    this.pendingBuyTile = undefined;
     this.selectedUnitId = undefined;
     this.reachable = undefined;
     this.selectedTile = idx;
@@ -287,7 +428,10 @@ export class App {
     else if (e.key === '-') this.zoomBy(0.8);
     else if (e.key === 'b' || e.key === 'B') this.foundCity();
     else if (e.key === ' ') this.skipSelected();
-    else if (e.key === 'Escape') this.selectUnit(undefined);
+    else if (e.key === 'Escape') {
+      this.selectUnit(undefined);
+      this.selectCity(undefined);
+    }
   }
 
   private zoomBy(f: number): void {
@@ -345,17 +489,21 @@ export class App {
         h('span', { class: 'civ-swatch' }),
         h('span', { class: 'civ-name' }, civ?.name ?? ''),
       ),
+      this.resourceBar(s),
       h('div', { class: 'turn-info' }, h('strong', {}, `${T.turn} ${s.turn}`), h('small', {}, turnYear(s.turn))),
       h('button', { class: 'btn icon', 'aria-label': T.menu, onclick: () => this.showGameMenu() }, '☰'),
     );
 
     const waiting = unitsNeedingOrders(s, s.currentPlayer);
+    const needProd = citiesNeedingProduction(s, s.currentPlayer).length > 0;
     const showNextUnit = waiting.length > 1 || (waiting.length === 1 && waiting[0].id !== this.selectedUnitId);
-    this.el.endTurn.textContent = showNextUnit ? T.nextUnit : T.nextTurn;
-    this.el.endTurn.classList.toggle('attention', showNextUnit);
+    this.el.endTurn.textContent = needProd ? T.chooseProduction : showNextUnit ? T.nextUnit : T.nextTurn;
+    this.el.endTurn.classList.toggle('attention', showNextUnit || needProd);
 
     const u = this.selectedUnit();
-    if (u) this.el.panel.append(this.unitPanel(u));
+    const city = this.selectedCity();
+    if (city) this.el.panel.append(this.cityPanel(city));
+    else if (u) this.el.panel.append(this.unitPanel(u));
     else if (this.selectedTile !== undefined) this.el.panel.append(this.tilePanel(this.selectedTile));
     else if (waiting.length) this.el.panel.append(h('p', { class: 'muted' }, T.unitsWaiting(waiting.length)));
   }
@@ -385,12 +533,34 @@ export class App {
     if (u.path?.length) {
       actions.push(h('button', { class: 'btn', onclick: () => this.dispatch({ type: 'cancelPath', unitId: u.id }) && this.renderHud() }, '✋ ' + T.cancelMove));
     }
+    if (def.charges) {
+      for (const id of availableImprovements(s, u)) {
+        const imp = IMPROVEMENTS[id];
+        actions.push(
+          h('button', { class: 'btn primary', onclick: () => this.unitAction({ type: 'buildImprovement', unitId: u.id, improvement: id }) }, `${imp.icon} ${imp.name}`),
+        );
+      }
+      const t = s.map.tiles[u.pos];
+      if (canRemoveFeature(s, u).ok && t.feature) {
+        const rem = FEATURE_REMOVAL[t.feature]!;
+        actions.push(
+          h('button', { class: 'btn', onclick: () => this.unitAction({ type: 'removeFeature', unitId: u.id }) }, `🪓 ${rem.name}${rem.production ? ` (+${rem.production} ⚒)` : ''}`),
+        );
+      }
+      if (canBuildRoad(s, u).ok) {
+        actions.push(h('button', { class: 'btn', onclick: () => this.unitAction({ type: 'buildRoad', unitId: u.id }) }, '🛤 ' + T.road));
+      }
+    }
     actions.push(h('button', { class: 'btn', onclick: () => this.skipSelected() }, '⏭ ' + T.skip));
 
     const info: (HTMLElement | string)[] = [
       h('strong', {}, `${def.glyph} ${def.name}`),
-      h('small', {}, `${T.moves}: ${u.movesLeft}/${def.moves}${u.fortified ? ' · Fortificado' : ''}`),
+      h('small', {}, `${T.moves}: ${fmt(u.movesLeft)}/${def.moves}${u.fortified ? ' · Fortificado' : ''}${def.charges ? ` · ${T.charges}: ${u.charges ?? 0}` : ''}`),
     ];
+    if (def.charges && u.movesLeft > 0) {
+      const b = availableImprovements(s, u);
+      if (!b.length && !canBuildRoad(s, u).ok && s.map.tiles[u.pos].owner !== u.owner) info.push(h('small', { class: 'muted' }, 'Mova o construtor para o seu território.'));
+    }
     if (this.pendingPath) info.push(h('small', { class: 'hint' }, `${T.turnsTo(this.pendingPath.turns)} — ${T.confirmMove}`));
     else if (def.canFoundCity) {
       const check = canFoundCity(s, u);
@@ -398,6 +568,176 @@ export class App {
     }
     info.push(h('small', { class: 'muted' }, describeTile(s.map.tiles[u.pos])));
     return h('div', { class: 'panel-inner' }, h('div', { class: 'panel-info' }, ...info), h('div', { class: 'actions' }, ...actions));
+  }
+
+  private unitAction(a: Action): void {
+    if (this.dispatch(a)) {
+      const u = this.selectedUnit();
+      if (!u || u.movesLeft <= 0) {
+        if (!this.selectNextUnit()) this.renderHud();
+      } else this.renderHud();
+    }
+  }
+
+  private resourceBar(s: GameState): HTMLElement {
+    const p = s.players[s.currentPlayer];
+    const inc = playerIncome(s, s.currentPlayer);
+    const item = (icon: string, total: number, per: number, label: string) =>
+      h('span', { class: 'res', title: `${label}: ${total} (+${per} ${T.perTurn})` }, `${icon} ${Math.floor(total)}`, h('small', {}, ` +${per}`));
+    return h(
+      'div',
+      { class: 'resbar' },
+      item('🪙', p.gold, inc.gold, 'Ouro'),
+      item('🔬', p.science, inc.science, 'Ciência'),
+      item('🎭', p.culture, inc.culture, 'Cultura'),
+      item('✨', p.faith, inc.faith, 'Fé'),
+    );
+  }
+
+  private cityPanel(c: City): HTMLElement {
+    const s = this.state!;
+    const y = cityYields(s, c);
+    const surplus = foodSurplus(s, c, y);
+    const housing = cityHousing(s, c);
+    const item = c.queue[0];
+    const ys = YIELD_KEYS.map((k) => `${YIELD_LABELS[k].icon}${y[k]}`).join(' ');
+    const lines: HTMLElement[] = [
+      h('strong', {}, `${c.isCapital ? '★ ' : ''}${c.name} — ${T.population} ${c.population}`),
+      h('small', {}, ys),
+      h(
+        'small',
+        {},
+        `🌾 ${Math.floor(c.foodStored)}/${growthThreshold(c.population)} (${surplus >= 0 ? '+' : ''}${surplus}) · ${T.growsIn(turnsToGrow(s, c))} · ${T.housing} ${c.population}/${housing}`,
+      ),
+      h(
+        'small',
+        {},
+        item
+          ? `⚒ ${itemName(item)}: ${Math.floor(c.progress[itemKey(item)] ?? 0)}/${itemCost(item)} · ${T.turns(turnsToProduce(s, c, item))}`
+          : `⚒ ${T.noProduction}`,
+      ),
+      h('small', { class: 'muted' }, `🎭 ${T.border}: ${Math.floor(c.cultureStored)}/${borderThreshold(c.cultureTiles)} · ${T.cityHint}`),
+    ];
+    const actions: HTMLElement[] = [
+      h('button', { class: `btn ${item ? '' : 'primary'}`, onclick: () => this.showProduction() }, '⚒ ' + T.production),
+      h(
+        'button',
+        { class: 'btn', onclick: () => this.cycleFocus(c) },
+        `🎯 ${T.focus}: ${FOCUS_LABELS[c.focus]}`,
+      ),
+    ];
+    if (this.pendingBuyTile !== undefined) {
+      const cost = tilePurchaseCost(s, c, this.pendingBuyTile);
+      const tile = this.pendingBuyTile;
+      actions.unshift(
+        h(
+          'button',
+          {
+            class: 'btn primary',
+            disabled: s.players[c.owner].gold < cost,
+            onclick: () => {
+              if (this.dispatch({ type: 'purchaseTile', cityId: c.id, tile })) {
+                this.pendingBuyTile = undefined;
+                this.renderHud();
+              }
+            },
+          },
+          T.buyTile(cost),
+        ),
+      );
+      lines.push(h('small', { class: 'hint' }, describeTile(s.map.tiles[tile])));
+    }
+    actions.push(h('button', { class: 'btn', onclick: () => this.selectCity(undefined) }, '✕ ' + T.close));
+    return h('div', { class: 'panel-inner' }, h('div', { class: 'panel-info' }, ...lines), h('div', { class: 'actions' }, ...actions));
+  }
+
+  private cycleFocus(c: City): void {
+    const order: CityFocus[] = ['balanced', 'food', 'production', 'gold'];
+    const next = order[(order.indexOf(c.focus) + 1) % order.length];
+    if (this.dispatch({ type: 'setFocus', cityId: c.id, focus: next })) this.renderHud();
+  }
+
+  private showProduction(): void {
+    const s = this.state;
+    const c = this.selectedCity();
+    if (!s || !c) return;
+    const host = this.modalHost();
+    const gold = s.players[c.owner].gold;
+    const reopen = () => {
+      this.renderHud();
+      this.showProduction();
+    };
+    const row = (item: ProductionItem) => {
+      const why = cannotProduce(s, c, item);
+      const def = item.kind === 'unit' ? UNITS[item.id] : BUILDINGS[item.id];
+      const price = purchaseCost(c, item);
+      const isCurrent = c.queue[0] && itemKey(c.queue[0]) === itemKey(item);
+      return h(
+        'div',
+        { class: `prod-row${isCurrent ? ' current' : ''}` },
+        h(
+          'button',
+          {
+            class: 'prod-main',
+            disabled: !!why,
+            onclick: () => {
+              if (this.dispatch({ type: 'setProduction', cityId: c.id, item })) {
+                closeModal(host);
+                this.renderHud();
+              }
+            },
+          },
+          h('strong', {}, `${item.kind === 'unit' ? (def as { glyph: string }).glyph + ' ' : '🏛 '}${def?.name ?? item.id}`),
+          h('small', {}, why ?? `${itemCost(item)} ⚒ · ${T.turns(turnsToProduce(s, c, item))}`),
+          h('small', { class: 'muted' }, def?.description ?? ''),
+        ),
+        h(
+          'div',
+          { class: 'prod-side' },
+          h(
+            'button',
+            { class: 'btn', disabled: !!why, onclick: () => this.dispatch({ type: 'enqueue', cityId: c.id, item }) && reopen() },
+            T.addToQueue,
+          ),
+          h(
+            'button',
+            {
+              class: 'btn',
+              disabled: !!why || gold < price,
+              onclick: () => this.dispatch({ type: 'purchaseItem', cityId: c.id, item }) && reopen(),
+            },
+            `${price} 🪙`,
+          ),
+        ),
+      );
+    };
+    const options = productionOptions(s, c);
+    const queue = c.queue.length
+      ? h(
+          'div',
+          { class: 'queue' },
+          h('label', { class: 'field-label' }, T.queue),
+          ...c.queue.map((q, k) =>
+            h(
+              'div',
+              { class: 'queue-item' },
+              h('span', {}, `${k + 1}. ${itemName(q)} · ${Math.floor(c.progress[itemKey(q)] ?? 0)}/${itemCost(q)}`),
+              h('button', { class: 'btn icon', 'aria-label': 'Remover', onclick: () => this.dispatch({ type: 'dequeue', cityId: c.id, index: k }) && reopen() }, '✕'),
+            ),
+          ),
+        )
+      : null;
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, `🪙 ${Math.floor(gold)} · ⚒ ${cityYields(s, c).production} ${T.perTurn}`),
+      queue,
+      h('label', { class: 'field-label' }, T.units),
+      ...options.filter((o) => o.kind === 'unit').map(row),
+      h('label', { class: 'field-label' }, T.buildings),
+      ...options.filter((o) => o.kind === 'building').map(row),
+    );
+    openModal(host, `${T.production} — ${c.name}`, body);
   }
 
   private tilePanel(idx: number): HTMLElement {
@@ -526,7 +866,8 @@ export class App {
       this.selectedUnitId = undefined;
       this.selectedTile = undefined;
       this.pendingPath = undefined;
-      this.setState(s);
+      this.selectedCityId = undefined;
+      this.setState(normalizeState(s));
       if (!this.selectNextUnit()) this.centerOnSelection();
       this.toast(T.loaded);
     } catch (e) {

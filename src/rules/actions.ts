@@ -1,5 +1,17 @@
+import type { ImprovementId } from '../data/improvements';
 import { UNITS } from '../data/units';
-import type { GameState, Unit } from '../state/types';
+import type { CityFocus, GameState, ProductionItem, Unit } from '../state/types';
+import { buildImprovement, buildRoad, removeFeature } from './builders';
+import {
+  assignCitizens,
+  cannotProduce,
+  itemKey,
+  processCity,
+  purchaseItem,
+  purchaseTile,
+  toggleWorkedTile,
+  type CityEvent,
+} from './cities';
 import { canFoundCity, foundCity } from './city';
 import { findPath, moveOneStep } from './movement';
 import { revealForPlayer } from './visibility';
@@ -14,13 +26,25 @@ export type Action =
   | { type: 'skipUnit'; unitId: number }
   | { type: 'fortify'; unitId: number }
   | { type: 'cancelPath'; unitId: number }
+  | { type: 'buildImprovement'; unitId: number; improvement: ImprovementId }
+  | { type: 'buildRoad'; unitId: number }
+  | { type: 'removeFeature'; unitId: number }
+  | { type: 'setProduction'; cityId: number; item: ProductionItem }
+  | { type: 'enqueue'; cityId: number; item: ProductionItem }
+  | { type: 'dequeue'; cityId: number; index: number }
+  | { type: 'purchaseItem'; cityId: number; item: ProductionItem }
+  | { type: 'purchaseTile'; cityId: number; tile: number }
+  | { type: 'toggleTile'; cityId: number; tile: number }
+  | { type: 'setFocus'; cityId: number; focus: CityFocus }
   | { type: 'endTurn' };
 
 export type GameEvent =
   | { type: 'error'; message: string }
   | { type: 'cityFounded'; cityId: number; name: string }
   | { type: 'unitMoved'; unitId: number; from: number; to: number }
-  | { type: 'turnStarted'; turn: number };
+  | { type: 'turnStarted'; turn: number }
+  | { type: 'info'; message: string }
+  | CityEvent;
 
 export interface ActionResult {
   state: GameState;
@@ -103,8 +127,67 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
       if (u) delete u.path;
       break;
     }
+    case 'buildImprovement':
+    case 'buildRoad':
+    case 'removeFeature': {
+      const u = findUnit(state, action.unitId);
+      if (!u || u.owner !== state.currentPlayer) return fail('Unidade inválida.');
+      const r =
+        action.type === 'buildImprovement'
+          ? buildImprovement(state, u, action.improvement)
+          : action.type === 'buildRoad'
+            ? buildRoad(state, u)
+            : removeFeature(state, u);
+      if (!r.ok) return fail(r.reason);
+      if ('production' in r && r.production) events.push({ type: 'info', message: `+${r.production} de produção para a cidade.` });
+      break;
+    }
+    case 'setProduction':
+    case 'enqueue': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      const why = cannotProduce(state, c, action.item);
+      if (why) return fail(why);
+      if (c.queue.some((q) => itemKey(q) === itemKey(action.item)) && action.item.kind === 'building') {
+        if (action.type === 'setProduction') {
+          c.queue = [action.item, ...c.queue.filter((q) => itemKey(q) !== itemKey(action.item))];
+        } else return fail('Já está na fila.');
+      } else if (action.type === 'setProduction') {
+        if (c.queue.length) c.queue[0] = action.item;
+        else c.queue.push(action.item);
+      } else c.queue.push(action.item);
+      break;
+    }
+    case 'dequeue': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      c.queue.splice(action.index, 1);
+      break;
+    }
+    case 'purchaseItem':
+    case 'purchaseTile':
+    case 'toggleTile': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      const why =
+        action.type === 'purchaseItem'
+          ? purchaseItem(state, c, action.item)
+          : action.type === 'purchaseTile'
+            ? purchaseTile(state, c, action.tile)
+            : toggleWorkedTile(state, c, action.tile);
+      if (why) return fail(why);
+      if (action.type === 'purchaseTile') revealForPlayer(state, c.owner);
+      break;
+    }
+    case 'setFocus': {
+      const c = state.cities.find((x) => x.id === action.cityId);
+      if (!c || c.owner !== state.currentPlayer) return fail('Cidade inválida.');
+      c.focus = action.focus;
+      assignCitizens(state, c);
+      break;
+    }
     case 'endTurn': {
-      endTurn(state);
+      events.push(...endTurn(state));
       events.push({ type: 'turnStarted', turn: state.turn });
       break;
     }
@@ -112,8 +195,10 @@ export function applyAction(prev: GameState, action: Action): ActionResult {
   return { state, events };
 }
 
-/** Fim de turno (muta). Na etapa 1 há só o jogador humano. */
-export function endTurn(state: GameState): void {
+/** Fim de turno (muta). Processa cidades, depois renova unidades. */
+export function endTurn(state: GameState): CityEvent[] {
+  const events: CityEvent[] = [];
+  for (const c of [...state.cities]) events.push(...processCity(state, c));
   state.turn++;
   for (const u of state.units) {
     u.movesLeft = UNITS[u.type].moves;
@@ -123,6 +208,7 @@ export function endTurn(state: GameState): void {
     if (u.path?.length) advanceAlongPath(state, u);
   }
   for (const p of state.players) revealForPlayer(state, p.id);
+  return events;
 }
 
 /** Unidades do jogador que ainda esperam ordens neste turno. */

@@ -16,6 +16,7 @@ export interface NewGameOptions {
 
 export function createUnit(state: GameState, type: string, owner: number, pos: number): Unit {
   const u: Unit = { id: state.nextId++, type, owner, pos, movesLeft: UNITS[type].moves };
+  if (UNITS[type].charges) u.charges = UNITS[type].charges;
   state.units.push(u);
   return u;
 }
@@ -29,6 +30,10 @@ export function newGame(opts: NewGameOptions): GameState {
     isHuman: true,
     explored: new Array(map.tiles.length).fill(0),
     citiesFounded: 0,
+    gold: 10,
+    science: 0,
+    culture: 0,
+    faith: 0,
   };
   const state: GameState = {
     schemaVersion: SCHEMA_VERSION,

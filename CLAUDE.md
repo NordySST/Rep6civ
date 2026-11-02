@@ -26,20 +26,23 @@ Pré-requisito (uma vez): Settings → Pages → Source = **GitHub Actions**.
 ```
 src/
   data/    Definições de conteúdo (terrenos, características, recursos, maravilhas, unidades,
-           civilizações, tamanhos de mapa, rendimentos). Só dados tipados, sem lógica.
+           edifícios, melhorias, civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
   state/   Tipos do estado serializável (types.ts), versão do esquema (version.ts) e
            salvar/carregar com migrações (save.ts).
   rules/   Regras PURAS, sem DOM: hex.ts (geometria), rng.ts/noise.ts (aleatoriedade com semente),
            mapgen.ts (geração procedural), tiles.ts (consultas/rendimentos), movement.ts
-           (custos, A*, alcance), visibility.ts (névoa), city.ts, game.ts (novo jogo),
-           actions.ts (redutor de ações + fim de turno).
+           (custos, A*, alcance, estradas), visibility.ts (névoa), city.ts (fundar),
+           cities.ts (gestão: rendimentos, cidadãos, crescimento, moradia, produção, cultura,
+           fronteiras, compras), builders.ts (melhorias, estradas, remoção de características),
+           game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom) e renderer.ts (arte procedural).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts.
   ai/      IA dos rivais (stub até a etapa 5).
   main.ts  Ponto de entrada; registra o service worker em produção.
 public/    manifest.webmanifest, sw.js (offline), ícones.
-tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save).
+tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save, cidades,
+           construtores). tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
 ```
 
 ### Convenções
@@ -78,6 +81,31 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save)
 - Cidade: só colono; terra transitável; distância mínima 4 de outra cidade; território raio 1;
   primeira cidade é a capital; remove floresta/selva/pântano do centro.
 - Calendário: turno 1 = 4000 a.C., +40 anos por turno (provisório).
+- Estradas: entre dois hexágonos com estrada (centros de cidade contam) o custo é 0,5 e
+  ignora terreno e rios.
+
+### Cidades (etapa 2)
+
+- Centro: rendimento do terreno sem característica/melhoria, mínimo 2 comida / 1 produção.
+  Capital recebe o Palácio (+2 produção, +3 ouro, +2 ciência, +1 cultura, +1 moradia).
+- Cidadãos: 1 por população, trabalham hexágonos do território da cidade até raio 3.
+  Distribuição gulosa (`assignCitizens`) pelo foco (Equilibrado/Comida/Produção/Ouro),
+  priorizando comida quando o saldo é baixo; hexágonos fixados (`locked`) vêm primeiro.
+- Comida: cada cidadão come 2. Crescimento em `15 + 8(n−1) + (n−1)^1,5`. Moradia: base 2,
+  +3 rio no centro (ou +1 costa), +edifícios; perto do limite o crescimento cai (50%/25%/0).
+  Estoque negativo → perde 1 de população.
+- Produção: fila (`queue`), progresso guardado por item (`progress["unit:warrior"]`),
+  excedente passa ao próximo item. Colono exige população 2 e consome 1. Compra com ouro
+  = 3 × produção restante. Cidade sem produção bloqueia o "Próximo turno" ("Escolher produção").
+- Cultura: acumula na cidade; ao atingir `10 + (6·k)^1,3` (k = hexágonos já ganhos) anexa o
+  melhor hexágono livre adjacente ao território. Compra de hexágono:
+  `15 + 10(d−1) + 2·(hexágonos da cidade) (+10 recurso, +20 maravilha)`.
+- Jogador acumula ouro, ciência, cultura e fé (ciência/cultura/fé serão gastos na etapa 3).
+- Construtor: 3 cargas. Melhoria ou remoção de característica gasta 1 carga e todo o
+  movimento; estrada não gasta carga. Só no próprio território, nunca no centro da cidade.
+  Recursos com `improvement` só aceitam aquela melhoria. Derrubar floresta (+20) / selva
+  (+15) adiciona produção ao item atual da cidade dona.
+- Selva só existe sobre planície (o gerador converte pradaria em planície ao pôr selva).
 
 ## Plano das 8 etapas
 
@@ -85,7 +113,7 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save)
    terrenos, colinas, floresta/selva/pântano, rios nas arestas, recursos bônus/luxo/estratégicos,
    maravilhas naturais; névoa de guerra; câmera (arrastar, pinça, +/−); salvar/carregar com
    versionamento e migração; colono e guerreiro; fundar cidade; próximo turno; PWA + deploy.
-2. **Cidades e território** — crescimento populacional, comida/produção, trabalho de hexágonos,
+2. **[CONCLUÍDA] Cidades e território** — crescimento populacional, comida/produção, trabalho de hexágonos,
    fila de produção (unidades e edifícios), expansão cultural de fronteiras, compra de hexágonos,
    construtores e melhorias (fazenda, mina, pastagem…), estradas, painel da cidade.
 3. **Ciência e cultura** — árvore de tecnologias e de cívicas, revelação de recursos estratégicos
@@ -102,6 +130,20 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save)
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 2 (concluída)
+- Esquema do save v2 (migração 1→2 + `normalizeState` ao carregar).
+- Dados: edifícios (Monumento, Celeiro, Moinho d’Água, Oficina, Santuário, Biblioteca,
+  Mercado, Farol, Palácio automático), melhorias (Fazenda, Mina, Pedreira, Pastagem,
+  Plantação, Acampamento), unidades Construtor e Batedor, custos de produção.
+- Regras: rendimentos, cidadãos, crescimento/fome, moradia, fila de produção com excedente,
+  compra de itens e hexágonos, expansão cultural de fronteiras, construtores e estradas.
+- UI: tocar na cidade abre o painel (estoques, turnos, foco, fila) e a visão da cidade no
+  mapa (rendimentos por hexágono, cidadãos ● branco / fixado ● amarelo, preços dos hexágonos
+  compráveis); modal de produção com fila e compra; ações do construtor; barra de recursos
+  (ouro/ciência/cultura/fé com saldo por turno); estandarte da cidade com produção.
+- Pendências: requisitos de tecnologia (`requiresTech`) ainda não são verificados (etapa 3);
+  sem manutenção em ouro (etapa 7); sem especialistas; melhorias aquáticas na etapa 7.
 
 ### Etapa 1 (concluída)
 - Estrutura do projeto, dados, gerador de mapas (fBm + núcleos continentais, nível do mar por

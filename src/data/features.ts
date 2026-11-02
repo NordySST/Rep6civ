@@ -31,7 +31,7 @@ export const FEATURES: Record<FeatureId, FeatureDef> = {
     extraMoveCost: 1,
     defense: 25,
     blocksSight: true,
-    allowedTerrains: ['grassland', 'plains'],
+    allowedTerrains: ['plains'],
   },
   marsh: {
     id: 'marsh',

@@ -22,6 +22,9 @@ export interface Tile {
   owner?: number;
   /** Cidade que reivindica o hexágono. */
   cityId?: number;
+  /** id em data/improvements */
+  improvement?: string;
+  road?: boolean;
 }
 
 export interface GameMap {
@@ -41,7 +44,16 @@ export interface Unit {
   fortified?: boolean;
   /** Ignorado ao procurar a próxima unidade (pular turno). */
   skipped?: boolean;
+  /** Cargas restantes (construtores). */
+  charges?: number;
 }
+
+export interface ProductionItem {
+  kind: 'unit' | 'building';
+  id: string;
+}
+
+export type CityFocus = 'balanced' | 'food' | 'production' | 'gold';
 
 export interface City {
   id: number;
@@ -51,6 +63,20 @@ export interface City {
   population: number;
   foundedTurn: number;
   isCapital: boolean;
+  foodStored: number;
+  /** Fila de produção; o item 0 é o atual. */
+  queue: ProductionItem[];
+  /** Progresso acumulado por item ("unit:warrior", "building:monument"). */
+  progress: Record<string, number>;
+  /** Hexágonos trabalhados pelos cidadãos (não inclui o centro). */
+  worked: number[];
+  /** Hexágonos fixados manualmente pelo jogador. */
+  locked: number[];
+  focus: CityFocus;
+  buildings: string[];
+  cultureStored: number;
+  /** Quantos hexágonos a cidade já ganhou por cultura. */
+  cultureTiles: number;
 }
 
 export interface Player {
@@ -61,6 +87,10 @@ export interface Player {
   explored: number[];
   /** Quantas cidades já foram fundadas (para escolher o próximo nome). */
   citiesFounded: number;
+  gold: number;
+  science: number;
+  culture: number;
+  faith: number;
 }
 
 export interface GameSettings {
