@@ -53,8 +53,10 @@ src/
            view.ts (interface `MapView` comum às visões 2D e 3D).
   render3d/ Visão 3D (three.js, carregada sob demanda): terrain.ts (relevo contínuo e cores a
            partir dos hexágonos), materials.ts (névoa e camada do chão nos shaders),
-           world.ts (malhas: terreno em blocos, água, rios, árvores, cidades) e
-           renderer3d.ts (câmera inclinada, toque por raio, figuras em pé).
+           world.ts (malhas: terreno em blocos, água, rios, árvores, cidades), models.ts
+           (miniaturas low-poly das unidades, `Kit` de primitivas), structures.ts (melhorias,
+           distritos, maravilhas, acampamentos) e renderer3d.ts (câmera inclinada, toque por
+           raio, unidades 3D, figuras em pé).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
@@ -422,8 +424,25 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   (`Renderer.drawSprites`): ícones de recursos, distritos, maravilhas, acampamentos,
   estandartes, unidades e efeitos, com a arte 2D posicionada nos pontos projetados.
 - `window.__rep6civ` ganhou `view()` e `tileToScreen(idx)` (testes automatizados).
-- Próximos: **3D-2** unidades em miniatura 3D, melhorias, distritos e maravilhas em 3D,
-  animações no relevo; **3D-3** sombras, água animada, nuvens na névoa, desempenho.
+
+### Visão 3D — Lote 3D-2
+
+- Unidades em miniatura (`models.ts`): esquadrões de 3 figuras com arma por tipo (clava,
+  funda, arco, lança, espada, mosquete), cavaleiros, catapulta, tanque, colono e mercador
+  com carroça, construtor, religiosos de manto, grandes personalidades douradas, galé,
+  quadrirreme, caravela, encouraçado e barco de embarque. Geometria `neutral` (cores por
+  vértice) + `team` (material com a cor da civilização). Modelos em cache por tipo; uma
+  instância por unidade, na cópia da volta mais próxima da câmera, virando para a direção
+  do passo e seguindo `unitPositions` (animações). Anel pulsante sob a selecionada.
+- Sobre cada miniatura fica a bandeirinha 2D (escudo menor + barra de vida).
+- Construções (`structures.ts`, uma malha só, refeita pela `structureSignature`): mina,
+  pedreira, pastagem, plantação, acampamento e barcos de pesca (a fazenda continua pintada
+  no chão); distritos com prédio próprio (campus com observatório, templo, anfiteatro,
+  mercado, fábrica com chaminés, paliçada com tendas, porto com guindaste) e ícone flutuante;
+  maravilhas mundiais em 5 formas (pirâmide, torre, colosso, cúpula, obeliscos);
+  acampamentos bárbaros com tendas e fogueira. Saqueadas ficam tombadas e afundadas.
+- Testes sem WebGL em `tests/render3d.test.ts` (relevo, costura da volta, assinatura, modelos).
+- Próximo: **3D-3** sombras, água animada, nuvens na névoa, desempenho em celulares.
 
 ## Plano das 8 etapas
 

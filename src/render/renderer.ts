@@ -368,13 +368,14 @@ export class Renderer implements MapView {
 
   // ------------------------------------------------------------------ camadas reaproveitadas pela visão 3D
 
-  private drawImprovements(state: GameState, idxs: number[]): void {
+  private drawImprovements(state: GameState, idxs: number[], onlyFlat = false): void {
     const { ctx } = this;
     for (const i of idxs) {
       const t = state.map.tiles[i];
       if (!t.improvement) continue;
       const c = tileCenter(state, i);
-      this.drawImprovement(t.improvement as ImprovementId, c);
+      // na visão 3D só a fazenda fica pintada no chão; as demais são modelos
+      if (!onlyFlat || t.improvement === 'farm') this.drawImprovement(t.improvement as ImprovementId, c);
       if (t.pillaged) {
         ctx.strokeStyle = '#e74c3c';
         ctx.lineWidth = 3;
@@ -504,7 +505,7 @@ export class Renderer implements MapView {
         if (isKnown(i)) idxs.push(i);
       }
       this.drawRoads(state, idxs, isKnown);
-      this.drawImprovements(state, idxs);
+      this.drawImprovements(state, idxs, true);
       this.drawReachable(state, overlay, isKnown);
       this.drawPlacement(state, overlay);
       this.drawAttackTargets(state, overlay);
@@ -529,6 +530,7 @@ export class Renderer implements MapView {
     tiles: number[],
     place: (wx: number, wy: number) => boolean,
     zoom: number,
+    models = false,
   ): void {
     const { ctx } = this;
     const playerId = state.currentPlayer;
@@ -553,13 +555,21 @@ export class Renderer implements MapView {
         if (!isKnown(i)) continue;
         const c = tileCenter(state, i);
         if (!place(c.x, c.y)) continue;
-        if (t.district) this.drawDistrict(t.district, { x: c.x, y: c.y - 10 });
-        if (t.builtWonder) this.drawBuiltWonder(t.builtWonder, { x: c.x, y: c.y - 12 }, zoom);
+        if (t.district) {
+          if (models) {
+            ctx.save();
+            ctx.translate(c.x, c.y - 30);
+            ctx.scale(0.62, 0.62);
+            this.drawDistrict(t.district, { x: 0, y: 0 });
+            ctx.restore();
+          } else this.drawDistrict(t.district, { x: c.x, y: c.y - 10 });
+        }
+        if (t.builtWonder && !models) this.drawBuiltWonder(t.builtWonder, { x: c.x, y: c.y - 12 }, zoom);
         if (t.wonder || t.resource) this.drawTileIcons(t, { x: c.x, y: c.y - 8 }, zoom, overlay.revealAll ? undefined : techs);
       }
     }
     for (const c of state.camps) {
-      if (!isKnown(c.pos)) continue;
+      if (models || !isKnown(c.pos)) continue;
       const p = tileCenter(state, c.pos);
       if (place(p.x, p.y)) this.drawCamp({ x: p.x, y: p.y - 8 });
     }
@@ -582,7 +592,17 @@ export class Renderer implements MapView {
       if (overlay.unitPositions?.has(u.id)) animated.push(u);
       else byTile.set(u.pos, [...(byTile.get(u.pos) ?? []), u]);
     }
-    const lift = 13;
+    // com miniaturas 3D, a unidade vira uma bandeirinha acima do modelo
+    const lift = models ? 36 : 13;
+    const badge = (x: number, y: number, draw: () => void) => {
+      if (!models) return draw();
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(0.68, 0.68);
+      ctx.translate(-x, -y);
+      draw();
+      ctx.restore();
+    };
     const stacks = [...byTile].sort((a, b) => a[0] - b[0]);
     for (const [pos, units] of stacks) {
       const { x, y } = tileCenter(state, pos);
@@ -590,10 +610,10 @@ export class Renderer implements MapView {
       units.forEach((u, k) => {
         const ux = x + (units.length > 1 ? (k === 0 ? -10 : 10) : 0);
         if (!place(ux, y)) return;
-        shadow(ux, y + 2, 10);
+        if (!models) shadow(ux, y + 2, 10);
         const uy = y - lift;
-        this.drawUnit(state, u.type, u.owner, ux, uy, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
-        if (u.hp < 100) this.drawHpBar(ux, uy + 16, 22, u.hp / 100);
+        badge(ux, uy, () => this.drawUnit(state, u.type, u.owner, ux, uy, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified));
+        if (u.hp < 100) this.drawHpBar(ux, uy + (models ? 11 : 16), 22, u.hp / 100);
         if (u.owner === playerId && UNITS[u.type].combat && u.promotions.length < PROMOTION_XP.length && u.xp >= PROMOTION_XP[u.promotions.length]) {
           ctx.fillStyle = '#ffd23f';
           ctx.font = '700 11px system-ui, sans-serif';
@@ -605,14 +625,14 @@ export class Renderer implements MapView {
     for (const u of animated) {
       const p = overlay.unitPositions!.get(u.id)!;
       if (!place(p.x, p.y)) continue;
-      shadow(p.x, p.y + 2, 10);
-      this.drawUnit(state, u.type, u.owner, p.x, p.y - lift, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
-      if (u.hp < 100) this.drawHpBar(p.x, p.y - lift + 16, 22, u.hp / 100);
+      if (!models) shadow(p.x, p.y + 2, 10);
+      badge(p.x, p.y - lift, () => this.drawUnit(state, u.type, u.owner, p.x, p.y - lift, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified));
+      if (u.hp < 100) this.drawHpBar(p.x, p.y - lift + (models ? 11 : 16), 22, u.hp / 100);
     }
     for (const g of overlay.ghosts ?? []) {
       if (!state.players[g.owner] || !place(g.x, g.y)) continue;
       ctx.globalAlpha = Math.max(0, g.alpha);
-      this.drawUnit(state, g.type, g.owner, g.x, g.y - lift, false, false, false);
+      badge(g.x, g.y - lift, () => this.drawUnit(state, g.type, g.owner, g.x, g.y - lift, false, false, false));
       ctx.globalAlpha = 1;
     }
     for (const b of overlay.bursts ?? []) if (place(b.x, b.y)) this.drawBurst({ ...b, y: b.y - 8 });
