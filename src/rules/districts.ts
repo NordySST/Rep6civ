@@ -17,8 +17,10 @@ import { isPassableLand, isWater } from './tiles';
 
 export const DISTRICT_RADIUS = 3;
 
-export function districtCost(): number {
-  return DISTRICT_BASE_COST;
+/** Custo de distrito: 60 + 4 por tecnologia conhecida do dono (encarece ao longo do jogo). */
+export function districtCost(state?: GameState, owner?: number): number {
+  if (!state || owner === undefined) return DISTRICT_BASE_COST;
+  return DISTRICT_BASE_COST + 4 * (state.players[owner]?.techs.length ?? 0);
 }
 
 /** Distritos especializados permitidos: 1 + 1 a cada 3 de população além da 1ª. */

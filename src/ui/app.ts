@@ -24,7 +24,7 @@ import {
 } from '../rules/diplomacy';
 import { CITY_STATE_BY_ID, CITY_STATE_TYPES } from '../data/cityStates';
 import type { DealItem } from '../state/types';
-import { availableImprovements, canBuildRoad, canRemoveFeature } from '../rules/builders';
+import { availableImprovements, canBuildRoad, canPillage, canRemoveFeature, canRepair } from '../rules/builders';
 import {
   borderThreshold,
   cannotProduce,
@@ -93,7 +93,7 @@ import { PROMOTION_BY_ID } from '../data/promotions';
 import { newGame, turnYear } from '../rules/game';
 import { findPath, reachableThisTurn } from '../rules/movement';
 import { describeTile, isPassableLand, tileYields, visibleResource } from '../rules/tiles';
-import { governmentSlots, availableGovernments, availablePolicies, canSlotPolicy } from '../rules/effects';
+import { governmentSlots, availableGovernments, availablePolicies, canSlotPolicy, policyUnlockCost } from '../rules/effects';
 import { availableItems, needsResearchChoice, progressOf, treeCost, treeDepth, turnsFor, type TreeKind } from '../rules/research';
 import { improvementFits } from '../rules/builders';
 import { TECHS, TECH_BY_ID } from '../data/techs';
@@ -138,7 +138,16 @@ export class App {
   private toastTimer = 0;
   private prefs: Prefs = loadPrefs();
   private victoryShown = false;
-  private anims: { unitId: number; from: { x: number; y: number }; to: { x: number; y: number }; start: number; dur: number }[] = [];
+  private anims: {
+    unitId: number;
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+    start: number;
+    dur: number;
+    /** 'move' desliza; 'lunge' avança e volta (ataque corpo a corpo). */
+    kind?: 'move' | 'lunge';
+  }[] = [];
+  private projectiles: { from: { x: number; y: number }; to: { x: number; y: number }; start: number; dur: number }[] = [];
   private floaters: { x: number; y: number; text: string; color: string; start: number }[] = [];
 
   private el = {
@@ -188,6 +197,8 @@ export class App {
     window.addEventListener('keydown', (e) => this.onKey(e));
     this.resize();
     this.loop();
+    // gancho de depuração/testes automatizados (somente leitura)
+    (window as unknown as { __rep6civ?: unknown }).__rep6civ = { camera: () => ({ ...this.cam }), turn: () => this.state?.turn };
   }
 
   // ------------------------------------------------------------------ ciclo
@@ -201,16 +212,21 @@ export class App {
     const now = performance.now();
     this.anims = this.anims.filter((a) => now - a.start < a.dur);
     this.floaters = this.floaters.filter((f) => now - f.start < 1100);
-    if (this.anims.length || this.floaters.length) this.dirty = true;
+    this.projectiles = this.projectiles.filter((p) => now - p.start < p.dur);
+    if (this.anims.length || this.floaters.length || this.projectiles.length) this.dirty = true;
     if (this.dirty && this.state) {
       this.dirty = false;
       const unitPositions = new Map<number, { x: number; y: number }>();
       for (const a of this.anims) {
         const t = Math.min(1, (now - a.start) / a.dur);
-        const e = t * (2 - t);
+        const e = a.kind === 'lunge' ? 0.45 * Math.sin(Math.PI * t) : t * (2 - t);
         unitPositions.set(a.unitId, { x: a.from.x + (a.to.x - a.from.x) * e, y: a.from.y + (a.to.y - a.from.y) * e });
       }
-      const floaters = this.floaters.map((f) => {
+      const projectiles = this.projectiles.map((p) => {
+        const t = Math.min(1, (now - p.start) / p.dur);
+        return { x: p.from.x + (p.to.x - p.from.x) * t, y: p.from.y + (p.to.y - p.from.y) * t - Math.sin(Math.PI * t) * 18 };
+      });
+      const floaters = this.floaters.filter((f) => now >= f.start).map((f) => {
         const t = (now - f.start) / 1100;
         return { x: f.x, y: f.y - 24 * t, text: f.text, color: f.color, alpha: 1 - t * t };
       });
@@ -228,6 +244,7 @@ export class App {
         cityInfo: this.cityInfo(),
         unitPositions: unitPositions.size ? unitPositions : undefined,
         floaters,
+        projectiles,
       };
       this.renderer.draw(this.state, this.cam, this.vis, overlay);
     }
@@ -286,7 +303,18 @@ export class App {
       if (ev.type === 'combat') {
         if (this.revealAll || this.vis[ev.pos]) {
           const c = tileCenter(s, ev.pos);
-          if (this.prefs.animations) this.floaters.push({ x: c.x, y: c.y - 8, text: `−${ev.damageToTarget}`, color: '#ff6b5b', start: now });
+          if (this.prefs.animations) {
+            const ranged = ev.attackerType === 'city' || !!UNITS[ev.attackerType]?.rangedStrength;
+            const from = tileCenter(s, ev.from);
+            // impacto aparece depois do golpe/projétil
+            const delay = ranged ? 260 : 160;
+            this.floaters.push({ x: c.x, y: c.y - 8, text: `−${ev.damageToTarget}`, color: '#ff6b5b', start: now + delay });
+            if (ranged) this.projectiles.push({ from, to: c, start: now, dur: 260 });
+            else {
+              const atk = s.units.find((u) => u.owner === ev.attackerOwner && (u.pos === ev.from || u.pos === ev.pos) && u.type === ev.attackerType);
+              if (atk && atk.pos === ev.from) this.anims.push({ unitId: atk.id, from, to: c, start: now, dur: 320, kind: 'lunge' });
+            }
+          }
         }
         if (ev.attackerOwner === s.currentPlayer || ev.defenderOwner === s.currentPlayer) sfx = 'combat';
       } else if (ev.type === 'cityFounded') sfx = 'city';
@@ -1031,6 +1059,12 @@ export class App {
     }
     if (this.pendingAttack !== undefined) {
       actions.unshift(h('button', { class: 'btn danger', onclick: () => this.confirmAttack() }, '⚔ ' + T.attack));
+    }
+    if (canPillage(s, u).ok) {
+      actions.unshift(h('button', { class: 'btn danger', onclick: () => this.unitAction({ type: 'pillage', unitId: u.id }) }, '🔥 ' + T.pillage));
+    }
+    if (canRepair(s, u).ok) {
+      actions.unshift(h('button', { class: 'btn primary', onclick: () => this.unitAction({ type: 'repair', unitId: u.id }) }, '🔧 ' + T.repair));
     }
     actions.push(h('button', { class: 'btn', onclick: () => this.skipSelected() }, '⏭ ' + T.skip));
 
@@ -1955,6 +1989,17 @@ export class App {
       'div',
       { class: 'form' },
       h('small', { class: p.policyChangeAvailable ? 'hint' : 'muted' }, p.policyChangeAvailable ? T.policyWindow : T.policyLocked),
+      !p.policyChangeAvailable && p.government
+        ? h(
+            'button',
+            {
+              class: 'btn',
+              disabled: p.gold < policyUnlockCost(p),
+              onclick: () => this.dispatch({ type: 'unlockPolicies' }) && reopen(),
+            },
+            `🔓 ${T.unlockPolicies(policyUnlockCost(p))}`,
+          )
+        : null,
       p.government ? null : h('p', { class: 'muted' }, T.noGovernment),
       govCards.length ? h('label', { class: 'field-label' }, 'Governos') : null,
       govCards.length ? h('div', { class: 'tree-grid' }, ...govCards) : null,

@@ -1,6 +1,7 @@
 import { MAP_SIZES } from '../data/mapSizes';
 import { UNITS } from '../data/units';
 import type { GameState, Unit } from '../state/types';
+import { canPillage, pillage } from './builders';
 import { attackTargets, barbarianId, nextRandom, resolveAttack, type CombatEvent } from './combat';
 import { distance, neighbors, tilesInRadius } from './hex';
 import { canOccupy, findPath, maxMoves, moveOneStep } from './movement';
@@ -130,6 +131,11 @@ function unitTurn(state: GameState, u: Unit, events: CombatEvent[]): void {
   u.movesLeft = maxMoves(state, u);
   if (UNITS[u.type].class !== 'military') return;
   if (tryAttack(state, u, events)) return;
+  // sem alvo ao alcance: saqueia a melhoria em que está
+  if (canPillage(state, u).ok) {
+    pillage(state, u);
+    return;
+  }
   const target = nearestTarget(state, u);
   if (target !== null) {
     // aproxima-se até ficar em alcance/adjacente
@@ -145,7 +151,12 @@ function unitTurn(state: GameState, u: Unit, events: CombatEvent[]): void {
         u.acted = true;
       }
     }
-    if (u.movesLeft > 0 && state.units.includes(u)) tryAttack(state, u, events);
+    if (u.movesLeft > 0 && state.units.includes(u) && !tryAttack(state, u, events) && canPillage(state, u).ok) pillage(state, u);
+    return;
+  }
+  // saqueia a melhoria em que está
+  if (canPillage(state, u).ok) {
+    pillage(state, u);
     return;
   }
   // vagueia perto do acampamento

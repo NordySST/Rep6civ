@@ -33,6 +33,8 @@ export interface Overlay {
   };
   /** Posições animadas de unidades (coordenadas de mundo). */
   unitPositions?: Map<number, { x: number; y: number }>;
+  /** Projéteis de ataques à distância (posição atual em coordenadas de mundo). */
+  projectiles?: { x: number; y: number }[];
   /** Textos flutuantes (dano etc.). */
   floaters?: { x: number; y: number; text: string; color: string; alpha: number }[];
   /** Modo de posicionamento de distrito/maravilha: hexágono → rótulo (ex.: "+2"). */
@@ -185,7 +187,20 @@ export class Renderer {
     if (detail) {
       for (const i of visibleIdx) {
         const t = state.map.tiles[i];
-        if (t.improvement) this.drawImprovement(t.improvement as ImprovementId, tileCenter(state, i));
+        if (t.improvement) {
+          const c = tileCenter(state, i);
+          this.drawImprovement(t.improvement as ImprovementId, c);
+          if (t.pillaged) {
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(c.x - 10, c.y);
+            ctx.lineTo(c.x + 10, c.y + 18);
+            ctx.moveTo(c.x + 10, c.y);
+            ctx.lineTo(c.x - 10, c.y + 18);
+            ctx.stroke();
+          }
+        }
       }
     }
 
@@ -330,6 +345,17 @@ export class Renderer {
     for (const u of animated) {
       const p = overlay.unitPositions!.get(u.id)!;
       this.drawUnit(state, u.type, u.owner, p.x, p.y + 2, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+    }
+
+    // projéteis
+    for (const pr of overlay.projectiles ?? []) {
+      ctx.fillStyle = '#ffe9a8';
+      ctx.strokeStyle = '#5a3a00';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
 
     // textos flutuantes
@@ -719,6 +745,24 @@ export class Renderer {
             ctx.fill();
           }
         }
+        break;
+      }
+      case 'fishing-boats': {
+        ctx.fillStyle = '#8b5a2b';
+        ctx.beginPath();
+        ctx.moveTo(x - 12, y + 8);
+        ctx.lineTo(x + 12, y + 8);
+        ctx.lineTo(x + 7, y + 14);
+        ctx.lineTo(x - 7, y + 14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#f5f0e1';
+        ctx.beginPath();
+        ctx.moveTo(x, y - 6);
+        ctx.lineTo(x, y + 7);
+        ctx.lineTo(x + 9, y + 7);
+        ctx.closePath();
+        ctx.fill();
         break;
       }
       case 'camp': {
