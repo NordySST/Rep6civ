@@ -76,7 +76,11 @@ import {
   religionOf,
 } from '../rules/religion';
 import { routesOf, routeYields, tradeCapacity, tradeDestinations } from '../rules/trade';
-import { distance, neighbors } from '../rules/hex';
+import { distance, hexLine, neighbors } from '../rules/hex';
+import { Fx, moveDuration } from './fx';
+
+/** Posição, tipo e dono das unidades antes de uma ação (para animar o que mudou). */
+type UnitSnap = Map<number, { pos: number; type: string; owner: number }>;
 import { FOLLOWER_BY_ID, PANTHEON_BY_ID, PANTHEON_COST, RELIGION_NAME_BY_ID } from '../data/religion';
 import { GREAT_PERSON_TYPES } from '../data/greatPeople';
 import { adjacencyBonus, districtLimit, districtSites, wonderSites } from '../rules/districts';
@@ -142,17 +146,11 @@ export class App {
   private toastTimer = 0;
   private prefs: Prefs = loadPrefs();
   private victoryShown = false;
-  private anims: {
-    unitId: number;
-    from: { x: number; y: number };
-    to: { x: number; y: number };
-    start: number;
-    dur: number;
-    /** 'move' desliza; 'lunge' avança e volta (ataque corpo a corpo). */
-    kind?: 'move' | 'lunge';
-  }[] = [];
-  private projectiles: { from: { x: number; y: number }; to: { x: number; y: number }; start: number; dur: number }[] = [];
-  private floaters: { x: number; y: number; text: string; color: string; start: number }[] = [];
+  /** Efeitos visuais temporários (movimento, combate, anéis, textos). */
+  private fx = new Fx();
+  /** Transição suave da câmera (centralizar, zoom pelos botões). */
+  private camTween?: { from: Camera; to: Camera; start: number; dur: number };
+  private lastPulse = 0;
 
   private el = {
     canvas: h('canvas', { id: 'map', 'aria-label': 'Mapa do jogo' }),
@@ -163,6 +161,7 @@ export class App {
     toast: h('div', { class: 'toast', role: 'status' }),
     tip: h('div', { class: 'tip', hidden: true, role: 'note' }),
     modal: h('div', { class: 'modal', hidden: true }),
+    banner: h('div', { class: 'turn-banner', 'aria-hidden': 'true' }),
   };
 
   constructor(root: HTMLElement) {
@@ -174,7 +173,7 @@ export class App {
     root.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest?.('button')) play('click');
     });
-    root.append(this.el.canvas, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal, this.el.tip);
+    root.append(this.el.canvas, this.el.banner, this.el.topbar, this.el.zoom, bottom, this.el.toast, this.el.modal, this.el.tip);
     this.renderer = new Renderer(this.el.canvas);
 
     this.el.zoom.append(
@@ -186,10 +185,12 @@ export class App {
 
     attachInput(this.el.canvas, {
       onPan: (dx, dy) => {
+        this.camTween = undefined;
         this.cam = this.clampCam({ ...this.cam, x: this.cam.x - dx / this.cam.zoom, y: this.cam.y - dy / this.cam.zoom });
         this.invalidate();
       },
       onZoom: (f, sx, sy) => {
+        this.camTween = undefined;
         this.cam = this.clampCam(zoomAt(this.cam, this.renderer.vw, this.renderer.vh, sx, sy, this.cam.zoom * f));
         this.invalidate();
       },
@@ -214,26 +215,24 @@ export class App {
 
   private loop = () => {
     const now = performance.now();
-    this.anims = this.anims.filter((a) => now - a.start < a.dur);
-    this.floaters = this.floaters.filter((f) => now - f.start < 1100);
-    this.projectiles = this.projectiles.filter((p) => now - p.start < p.dur);
-    if (this.anims.length || this.floaters.length || this.projectiles.length) this.dirty = true;
+    if (this.fx.active(now)) this.dirty = true;
+    if (this.camTween) {
+      const { from, to, start, dur } = this.camTween;
+      const t = Math.min(1, (now - start) / dur);
+      const e = 1 - Math.pow(1 - t, 3);
+      this.cam = this.clampCam({ x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, zoom: from.zoom + (to.zoom - from.zoom) * e });
+      if (t >= 1) this.camTween = undefined;
+      this.dirty = true;
+    }
+    // pulso da unidade selecionada (~20 quadros/s para poupar bateria)
+    const pulsing = this.prefs.animations && this.selectedUnitId !== undefined && this.el.modal.hidden;
+    if (pulsing && now - this.lastPulse > 50) {
+      this.lastPulse = now;
+      this.dirty = true;
+    }
     if (this.dirty && this.state) {
       this.dirty = false;
-      const unitPositions = new Map<number, { x: number; y: number }>();
-      for (const a of this.anims) {
-        const t = Math.min(1, (now - a.start) / a.dur);
-        const e = a.kind === 'lunge' ? 0.45 * Math.sin(Math.PI * t) : t * (2 - t);
-        unitPositions.set(a.unitId, { x: a.from.x + (a.to.x - a.from.x) * e, y: a.from.y + (a.to.y - a.from.y) * e });
-      }
-      const projectiles = this.projectiles.map((p) => {
-        const t = Math.min(1, (now - p.start) / p.dur);
-        return { x: p.from.x + (p.to.x - p.from.x) * t, y: p.from.y + (p.to.y - p.from.y) * t - Math.sin(Math.PI * t) * 18 };
-      });
-      const floaters = this.floaters.filter((f) => now >= f.start).map((f) => {
-        const t = (now - f.start) / 1100;
-        return { x: f.x, y: f.y - 24 * t, text: f.text, color: f.color, alpha: 1 - t * t };
-      });
+      const { unitPositions, projectiles, floaters, ghosts, bursts } = this.fx.frame(now);
       const overlay: Overlay = {
         selectedUnitId: this.selectedUnitId,
         selectedTile: this.selectedTile,
@@ -249,6 +248,9 @@ export class App {
         unitPositions: unitPositions.size ? unitPositions : undefined,
         floaters,
         projectiles,
+        ghosts,
+        bursts,
+        pulse: pulsing ? (now % 1400) / 1400 : undefined,
       };
       this.renderer.draw(this.state, this.cam, this.vis, overlay);
     }
@@ -289,44 +291,23 @@ export class App {
 
   private dispatch(action: Action): boolean {
     if (!this.state) return false;
-    const before = new Map(this.state.units.filter((u) => u.owner === this.state!.currentPlayer).map((u) => [u.id, u.pos]));
+    const before: UnitSnap = new Map(this.state.units.map((u) => [u.id, { pos: u.pos, type: u.type, owner: u.owner }]));
+    const beforeVis = this.vis;
+    const viewer = this.state.currentPlayer;
     // o fim de turno passa pela IA (rivais e cidades-estado jogam antes da rodada terminar)
     const result = action.type === 'endTurn' ? playEndTurn(this.state) : applyAction(this.state, action);
     const ok = this.applyResult(result, action.type === 'endTurn' || action.type === 'passTurn');
-    if (ok) this.animateResult(before, result.events, action.type === 'endTurn');
+    if (ok) this.animateResult(before, beforeVis, viewer, result.events, action.type === 'endTurn');
     return ok;
   }
 
-  private animateResult(before: Map<number, number>, events: ActionResult['events'], endTurn: boolean): void {
+  private animateResult(before: UnitSnap, beforeVis: Uint8Array, viewer: number, events: ActionResult['events'], endTurn: boolean): void {
     const s = this.state!;
-    const now = performance.now();
-    if (this.prefs.animations && !endTurn) {
-      for (const u of s.units) {
-        const from = before.get(u.id);
-        if (from === undefined || from === u.pos) continue;
-        const d = distance(s.map, from, u.pos);
-        const fc = tileCenter(s, from);
-        this.anims.push({ unitId: u.id, from: fc, to: nearCenter(s, u.pos, fc), start: now, dur: Math.min(450, 120 + d * 90) });
-      }
-    }
+    // no multijogador local, quem assume a vez não deve ver o que aconteceu na vez do outro
+    if (this.prefs.animations && viewer === s.currentPlayer) this.queueEffects(before, beforeVis, events);
     let sfx: Sfx | null = endTurn ? 'endTurn' : null;
     for (const ev of events) {
       if (ev.type === 'combat') {
-        if (this.revealAll || this.vis[ev.pos]) {
-          const c = tileCenter(s, ev.pos);
-          if (this.prefs.animations) {
-            const ranged = ev.attackerType === 'city' || !!UNITS[ev.attackerType]?.rangedStrength;
-            const from = nearCenter(s, ev.from, c);
-            // impacto aparece depois do golpe/projétil
-            const delay = ranged ? 260 : 160;
-            this.floaters.push({ x: c.x, y: c.y - 8, text: `−${ev.damageToTarget}`, color: '#ff6b5b', start: now + delay });
-            if (ranged) this.projectiles.push({ from, to: c, start: now, dur: 260 });
-            else {
-              const atk = s.units.find((u) => u.owner === ev.attackerOwner && (u.pos === ev.from || u.pos === ev.pos) && u.type === ev.attackerType);
-              if (atk && atk.pos === ev.from) this.anims.push({ unitId: atk.id, from, to: c, start: now, dur: 320, kind: 'lunge' });
-            }
-          }
-        }
         if (ev.attackerOwner === s.currentPlayer || ev.defenderOwner === s.currentPlayer) sfx = 'combat';
       } else if (ev.type === 'cityFounded') sfx = 'city';
       else if (ev.type === 'firstContact' || ev.type === 'warDeclared' || ev.type === 'eraChanged' || ev.type === 'greatPerson') sfx = sfx ?? 'notify';
@@ -334,6 +315,137 @@ export class App {
     }
     if (sfx) play(sfx);
     this.invalidate();
+  }
+
+  /**
+   * Monta a linha do tempo visual de uma ação ou de uma rodada inteira: cada unidade segue
+   * o próprio cursor de tempo (anda → ataca → avança), então movimentos e ataques da IA
+   * aparecem na ordem em que aconteceram. Outros jogadores só animam onde você vê.
+   */
+  private queueEffects(before: UnitSnap, beforeVis: Uint8Array, events: ActionResult['events']): void {
+    const s = this.state!;
+    const now = performance.now();
+    const viewer = s.currentPlayer;
+    const seen = (i: number) => this.revealAll || !!this.vis[i] || !!beforeVis[i];
+    const cursor = new Map<number, number>();
+    const lastPos = new Map<number, number>();
+    const ghosted = new Set<number>();
+    const after = new Map(s.units.map((u) => [u.id, u]));
+    const posOf = (id: number) => lastPos.get(id) ?? before.get(id)?.pos;
+    const at = (id: number) => cursor.get(id) ?? now;
+    const chain = (route: number[]) => {
+      const pts: { x: number; y: number }[] = [];
+      for (const i of route) pts.push(pts.length ? nearCenter(s, i, pts[pts.length - 1]) : tileCenter(s, i));
+      return pts;
+    };
+    /** Agenda o deslocamento de `id` pela rota; devolve quando termina. */
+    const walk = (id: number, route: number[]): number => {
+      const t0 = at(id);
+      if (route.length < 2) return t0;
+      lastPos.set(id, route[route.length - 1]);
+      const owner = after.get(id)?.owner ?? before.get(id)?.owner;
+      let r = route;
+      if (owner !== viewer) {
+        const k = r.findIndex(seen);
+        r = k < 0 ? [] : r.slice(k);
+      }
+      if (r.length < 2) return t0;
+      const dur = moveDuration(r.length - 1);
+      this.fx.move(id, chain(r), t0, dur);
+      cursor.set(id, t0 + dur);
+      return t0 + dur;
+    };
+    /** Caminho aproximado (sem evento detalhado, ex.: bárbaros); longe demais = salto. */
+    const line = (a: number, b: number) => (a === b ? [a] : distance(s.map, a, b) <= 6 ? hexLine(s.map, a, b) : [a]);
+    const sync = (id: number, pos: number) => {
+      const p = posOf(id);
+      if (p !== undefined && p !== pos) walk(id, line(p, pos));
+      if (p === undefined || line(p, pos).length < 2) lastPos.set(id, pos);
+    };
+    const findAttacker = (ev: Extract<ActionResult['events'][number], { type: 'combat' }>) => {
+      let best: number | undefined;
+      let bestD = Infinity;
+      for (const [id, b] of before) {
+        if (b.owner !== ev.attackerOwner || b.type !== ev.attackerType) continue;
+        const u = after.get(id);
+        const d = u ? (u.pos === ev.from || u.pos === ev.pos ? -1 : distance(s.map, u.pos, ev.from)) : distance(s.map, posOf(id)!, ev.from);
+        if (d < bestD) {
+          bestD = d;
+          best = id;
+        }
+      }
+      return bestD <= 6 ? best : undefined;
+    };
+
+    for (const ev of events) {
+      if (ev.type === 'unitMoved') {
+        sync(ev.unitId, ev.from);
+        walk(ev.unitId, [ev.from, ...(ev.trail?.length ? ev.trail : line(ev.from, ev.to).slice(1))]);
+      } else if (ev.type === 'combat') {
+        const atkId = ev.attackerType === 'city' ? undefined : findAttacker(ev);
+        if (atkId !== undefined) sync(atkId, ev.from);
+        if (!seen(ev.pos) && !seen(ev.from)) continue;
+        const t0 = atkId !== undefined ? at(atkId) : now;
+        const c = tileCenter(s, ev.pos);
+        const from = nearCenter(s, ev.from, c);
+        const ranged = ev.attackerType === 'city' || !!UNITS[ev.attackerType]?.rangedStrength;
+        const heavy = ev.attackerType === 'city' || UNITS[ev.attackerType]?.combat === 'siege';
+        let impact: number;
+        if (ranged) {
+          this.fx.projectile(from, c, t0, heavy, heavy ? 380 : 300);
+          impact = t0 + (heavy ? 380 : 300);
+        } else {
+          if (atkId !== undefined) this.fx.lunge(atkId, from, c, t0, 340);
+          impact = t0 + 210;
+        }
+        this.fx.burst(c, ranged ? '#ffd38a' : '#ff9a6b', 'impact', impact);
+        this.fx.floater(c.x, c.y - 10, `−${ev.damageToTarget}`, '#ff6b5b', impact, ev.damageToTarget >= 40 ? 17 : 14);
+        if (ev.damageToAttacker > 0) this.fx.floater(from.x, from.y - 10, `−${ev.damageToAttacker}`, '#ffb36b', impact + 80, 12);
+        // defensor sobrevivente estremece; mortos somem depois do golpe
+        const defender = s.units.find((u) => u.pos === ev.pos && u.owner === ev.defenderOwner && UNITS[u.type].class === 'military');
+        if (defender && !ev.targetKilled) this.fx.shake(defender.id, c, impact);
+        if (ev.targetKilled) {
+          for (const [id, b] of before) {
+            if (!after.has(id) && b.owner === ev.defenderOwner && posOf(id) === ev.pos && !ghosted.has(id)) {
+              ghosted.add(id);
+              this.fx.ghost(b.type, b.owner, c, now, impact);
+            }
+          }
+        }
+        if (ev.attackerKilled && atkId !== undefined && !ghosted.has(atkId)) {
+          ghosted.add(atkId);
+          const b = before.get(atkId)!;
+          this.fx.ghost(b.type, b.owner, from, now, impact + 120);
+        }
+        if (atkId !== undefined) {
+          cursor.set(atkId, t0 + (ranged ? 300 : 340));
+          // corpo a corpo que venceu avança para o hexágono
+          if (!ranged && after.get(atkId)?.pos === ev.pos) walk(atkId, [ev.from, ev.pos]);
+        }
+      } else if (ev.type === 'cityFounded' || ev.type === 'cityCaptured') {
+        const city = s.cities.find((c) => c.id === ev.cityId);
+        if (city && seen(city.pos)) this.fx.burst(tileCenter(s, city.pos), ev.type === 'cityFounded' ? '#ffd23f' : '#ff5b5b', 'ring', now);
+      } else if (ev.type === 'campCleared' && seen(ev.pos)) {
+        const c = tileCenter(s, ev.pos);
+        this.fx.burst(c, '#ffd23f', 'ring', now);
+        if (ev.by === viewer) this.fx.floater(c.x, c.y - 14, `+${ev.gold} 🪙`, '#ffd23f', now + 150, 14, 1500);
+      }
+    }
+    // movimentos sem evento (bárbaros, expulsões, avanço após captura de civil)
+    for (const u of s.units) {
+      const p = posOf(u.id);
+      if (p !== undefined && p !== u.pos) walk(u.id, line(p, u.pos));
+    }
+  }
+
+  /** Mostra "Turno N · ano" por um instante no centro da tela. */
+  private showTurnBanner(): void {
+    if (!this.state || !this.prefs.animations) return;
+    const b = this.el.banner;
+    b.replaceChildren(h('strong', {}, `${T.turn} ${this.state.turn}`), h('span', {}, turnYear(this.state.turn)));
+    b.classList.remove('show');
+    void b.offsetWidth; // reinicia a animação CSS
+    b.classList.add('show');
   }
 
   /**
@@ -731,6 +843,7 @@ export class App {
     this.pendingPath = undefined;
     this.setState(s);
     this.inbox = {};
+    this.fx.clear();
     this.saveInbox();
     this.cam.zoom = 1.1;
     this.victoryShown = false;
@@ -849,6 +962,7 @@ export class App {
     }
     this.selectedCityId = undefined;
     if (!this.selectNextUnit()) this.selectUnit(undefined);
+    this.showTurnBanner();
     const me = this.state.players[this.state.currentPlayer];
     if (me.eliminated) return this.showGameOver();
     const w = this.state.winner;
@@ -991,14 +1105,33 @@ export class App {
   }
 
   private zoomBy(f: number): void {
-    this.cam = this.clampCam(zoomAt(this.cam, this.renderer.vw, this.renderer.vh, this.renderer.vw / 2, this.renderer.vh / 2, this.cam.zoom * f));
-    this.invalidate();
+    const base = this.camTween?.to ?? this.cam;
+    this.moveCamera(this.clampCam(zoomAt(base, this.renderer.vw, this.renderer.vh, this.renderer.vw / 2, this.renderer.vh / 2, base.zoom * f)), 220);
   }
 
   private centerOn(idx: number): void {
     if (!this.state) return;
     const c = tileCenter(this.state, idx);
-    this.cam = this.clampCam({ ...this.cam, x: c.x, y: c.y });
+    const dist = Math.hypot(this.wrapDx(c.x - this.cam.x), c.y - this.cam.y) * this.cam.zoom;
+    this.moveCamera({ ...this.cam, x: c.x, y: c.y }, Math.min(550, 220 + dist / 4));
+  }
+
+  /** Diferença horizontal pelo lado mais curto (mapa com volta). */
+  private wrapDx(dx: number): number {
+    if (!this.state?.map.wrap) return dx;
+    const P = worldSize(this.state).w;
+    return ((((dx + P / 2) % P) + P) % P) - P / 2;
+  }
+
+  /** Leva a câmera até `to`; desliza se as animações estiverem ligadas e o salto não for enorme. */
+  private moveCamera(to: Camera, dur: number): void {
+    const from = this.cam;
+    const target = { ...to, x: from.x + this.wrapDx(to.x - from.x) };
+    const far = Math.hypot(target.x - from.x, target.y - from.y) * from.zoom > Math.max(this.renderer.vw, this.renderer.vh) * 2.5;
+    if (!this.prefs.animations || far) {
+      this.camTween = undefined;
+      this.cam = this.clampCam(target);
+    } else this.camTween = { from, to: target, start: performance.now(), dur };
     this.invalidate();
   }
 
@@ -2124,7 +2257,9 @@ export class App {
               this.el.modal.classList.remove('handoff');
               closeModal(host);
               this.setState(s);
+              this.fx.clear();
               if (!this.selectNextUnit()) this.centerOnSelection();
+              this.showTurnBanner();
               const w = s.winner;
               if (w && !this.victoryShown) {
                 this.victoryShown = true;
@@ -2446,6 +2581,7 @@ export class App {
       this.selectedCityId = undefined;
       this.setState(normalizeState(s));
       this.loadInbox();
+      this.fx.clear();
       this.victoryShown = !!s.winner;
       if (!this.selectNextUnit()) this.centerOnSelection();
       this.toast(T.loaded);
