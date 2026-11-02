@@ -47,9 +47,25 @@ export interface Overlay {
   cityInfo?: Map<number, { growTurns: number; prodName?: string; prodTurns?: number; prodFrac: number }>;
 }
 
+/** Período horizontal do mundo (mapas com volta leste-oeste). */
+export function worldPeriod(state: GameState): number {
+  return HEX_SIZE * SQRT3 * state.map.width;
+}
+
+/** Centro de `idx` deslocado para a cópia mais próxima do ponto `near` (emenda do mapa). */
+export function nearCenter(state: GameState, idx: number, near: { x: number; y: number }): { x: number; y: number } {
+  const c = tileCenter(state, idx);
+  if (!state.map.wrap) return c;
+  const P = worldPeriod(state);
+  let x = c.x;
+  while (x - near.x > P / 2) x -= P;
+  while (near.x - x > P / 2) x += P;
+  return { x, y: c.y };
+}
+
 export function worldSize(state: GameState) {
   return {
-    w: HEX_SIZE * SQRT3 * (state.map.width + 0.5),
+    w: state.map.wrap ? worldPeriod(state) : HEX_SIZE * SQRT3 * (state.map.width + 0.5),
     h: HEX_SIZE * 1.5 * (state.map.height - 1) + HEX_SIZE * 2,
   };
 }
@@ -61,7 +77,9 @@ export function tileCenter(state: GameState, idx: number) {
 }
 
 export function tileAtWorld(state: GameState, wx: number, wy: number): number {
-  const { col, row } = pixelToOffset(wx - (HEX_SIZE * SQRT3) / 2, wy - HEX_SIZE, HEX_SIZE);
+  const off = pixelToOffset(wx - (HEX_SIZE * SQRT3) / 2, wy - HEX_SIZE, HEX_SIZE);
+  const row = off.row;
+  const col = state.map.wrap ? ((off.col % state.map.width) + state.map.width) % state.map.width : off.col;
   if (col < 0 || row < 0 || col >= state.map.width || row >= state.map.height) return -1;
   return row * state.map.width + col;
 }
@@ -122,7 +140,31 @@ export class Renderer {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = '#0b0f14';
     ctx.fillRect(0, 0, this.vw, this.vh);
+    if (!state.map.wrap) {
+      this.drawWorld(state, cam, vis, overlay, explored, techs, playerId);
+    } else {
+      // mapa cilíndrico: desenha as cópias vizinhas que aparecem na tela
+      const P = worldPeriod(state);
+      const half = this.vw / 2 / cam.zoom;
+      for (const sh of [-P, 0, P]) {
+        const cx = cam.x - sh;
+        if (cx + half < -HEX_SIZE * 2 || cx - half > P + HEX_SIZE * 2) continue;
+        this.drawWorld(state, { ...cam, x: cx }, vis, overlay, explored, techs, playerId);
+      }
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
 
+  private drawWorld(
+    state: GameState,
+    cam: Camera,
+    vis: Uint8Array,
+    overlay: Overlay,
+    explored: number[],
+    techs: readonly string[],
+    playerId: number,
+  ): void {
+    const { ctx } = this;
     // transforma para coordenadas de mundo
     ctx.setTransform(
       this.dpr * cam.zoom,
@@ -672,7 +714,7 @@ export class Renderer {
         if (n < 0 || !road(n) || !isKnown(n)) continue;
         linked = true;
         if (n < i && idxs.includes(n)) continue;
-        const b = tileCenter(state, n);
+        const b = nearCenter(state, n, a);
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
       }
@@ -962,7 +1004,8 @@ export class Renderer {
 
   private drawPath(state: GameState, from: number, path: number[], turns: number): void {
     const { ctx } = this;
-    const pts = [from, ...path].map((i) => tileCenter(state, i));
+    const pts: { x: number; y: number }[] = [];
+    for (const i of [from, ...path]) pts.push(pts.length ? nearCenter(state, i, pts[pts.length - 1]) : tileCenter(state, i));
     ctx.strokeStyle = 'rgba(255, 240, 160, 0.9)';
     ctx.lineWidth = 3;
     ctx.setLineDash([6, 5]);

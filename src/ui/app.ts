@@ -5,7 +5,7 @@ import { UNITS } from '../data/units';
 import { WONDER_BY_ID } from '../data/wonders';
 import { YIELD_KEYS, YIELD_LABELS } from '../data/yields';
 import { clampCamera, clampZoom, type Camera, zoomAt } from '../render/camera';
-import { Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
+import { nearCenter, Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
 import { activeHumans, applyAction, nextHuman, unitsNeedingOrders, type Action, type ActionResult } from '../rules/actions';
 import { playEndTurn, proposeDeal } from '../ai';
 import { unitStrength } from '../ai/common';
@@ -268,6 +268,12 @@ export class App {
   private clampCam(c: Camera): Camera {
     if (!this.state) return c;
     const ws = worldSize(this.state);
+    if (this.state.map.wrap) {
+      // volta leste-oeste: x circula, só y é limitado
+      const P = ws.w;
+      const cl = clampCamera({ ...c, zoom: clampZoom(c.zoom) }, P, ws.h);
+      return { ...cl, x: ((c.x % P) + P) % P };
+    }
     return clampCamera({ ...c, zoom: clampZoom(c.zoom) }, ws.w, ws.h);
   }
 
@@ -299,7 +305,8 @@ export class App {
         const from = before.get(u.id);
         if (from === undefined || from === u.pos) continue;
         const d = distance(s.map, from, u.pos);
-        this.anims.push({ unitId: u.id, from: tileCenter(s, from), to: tileCenter(s, u.pos), start: now, dur: Math.min(450, 120 + d * 90) });
+        const fc = tileCenter(s, from);
+        this.anims.push({ unitId: u.id, from: fc, to: nearCenter(s, u.pos, fc), start: now, dur: Math.min(450, 120 + d * 90) });
       }
     }
     let sfx: Sfx | null = endTurn ? 'endTurn' : null;
@@ -309,7 +316,7 @@ export class App {
           const c = tileCenter(s, ev.pos);
           if (this.prefs.animations) {
             const ranged = ev.attackerType === 'city' || !!UNITS[ev.attackerType]?.rangedStrength;
-            const from = tileCenter(s, ev.from);
+            const from = nearCenter(s, ev.from, c);
             // impacto aparece depois do golpe/projétil
             const delay = ranged ? 260 : 160;
             this.floaters.push({ x: c.x, y: c.y - 8, text: `−${ev.damageToTarget}`, color: '#ff6b5b', start: now + delay });

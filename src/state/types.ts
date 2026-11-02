@@ -36,6 +36,8 @@ export interface Tile {
 export interface GameMap {
   width: number;
   height: number;
+  /** Mapa dá a volta leste-oeste (novos jogos; saves antigos não). */
+  wrap?: boolean;
   tiles: Tile[];
 }
 
