@@ -236,18 +236,22 @@ function grip(k: Kit, part: PackModel | undefined, at: [number, number, number] 
   k.pop();
 }
 
-/** Um soldado importado (≈9 de altura) com equipamento. */
-function soldier(k: Kit, pack: Pack, x: number, z: number, g: Gear, ry = 0, rider = false): void {
-  const body = pack.get(rider ? 'rider' : 'knight');
+/** Um personagem importado (≈9 de altura, ou `height`) com equipamento. */
+function soldier(k: Kit, pack: Pack, x: number, z: number, g: Gear, ry = 0, rider = false, bodyName?: string, height = 9): void {
+  const body = pack.get(bodyName ?? (rider ? 'rider' : 'knight'));
   if (!body) return;
-  const S = 9 / (body.max[1] - body.min[1]);
+  const S = height / (body.max[1] - body.min[1]);
   k.push(x, -body.min[1] * S, z, ry, S);
   k.model(body);
   const pts = body.points;
-  if (g.weapon) grip(k, pack.get(g.weapon), pts.Palm_R, g.ws ?? 0.45, g.wrz ?? 0);
+  const handR = pts.Palm_R ?? pts.Fist_R ?? pts.Hand_R;
+  const handL = pts.Palm_L ?? pts.Fist_L ?? pts.Hand_L;
+  // armas do pacote de armas foram ajustadas ao cavaleiro: compensa a escala de outros corpos
+  const rel = bodyName ? (pack.get('knight') ? (pack.get('knight')!.max[1] - pack.get('knight')!.min[1]) / (body.max[1] - body.min[1]) : 1) : 1;
+  if (g.weapon) grip(k, pack.get(g.weapon), handR, (g.ws ?? 0.45) / rel, g.wrz ?? 0);
   if (g.shield) {
     const sh = pack.get(g.shield);
-    const p = pts.Palm_L;
+    const p = handL;
     if (sh && p) {
       const cy = (sh.min[1] + sh.max[1]) / 2;
       k.model(sh, p[0] + 0.25, p[1] - cy * 0.75, p[2] + 0.35, Math.PI / 2, 0.75);
@@ -318,9 +322,34 @@ function packUnit(type: string, embarked: boolean, pack: Pack): Model | null {
       soldier(k, pack, 0, 0, { weapon: 'spear', ws: 0.8 });
       break;
     case 'builder':
-      soldier(k, pack, -2, 1, { weapon: 'hammer', ws: 0.5 });
+      if (!pack.get('worker')) return null;
+      soldier(k, pack, -2, 1, { weapon: 'hammer', ws: 0.5 }, 0, false, 'worker');
       k.box(4, 1.2, 2.2, '#7a5532', 3, 0, -1);
       k.box(3.6, 1.2, 2.2, '#7a5532', 3, 1.2, -1, 0.4);
+      k.box(1.2, 2.4, 1.2, '#8d8478', 4.5, 0, 2);
+      break;
+    case 'missionary':
+      if (!pack.get('monk')) return null;
+      soldier(k, pack, 0, 0, { weapon: 'spear', ws: 0.55 }, 0, false, 'monk', 10);
+      break;
+    case 'apostle':
+      if (!pack.get('wizard')) return null;
+      k.cyl(3.2, 3.2, 0.25, '#ffd23f', 0, 0.1, 0, 14);
+      soldier(k, pack, 0, 0, {}, 0, false, 'wizard', 11);
+      break;
+    case 'inquisitor':
+      if (!pack.get('inquisitor')) return null;
+      soldier(k, pack, 0, 0, { weapon: 'hammer', ws: 0.5 }, 0, false, 'inquisitor', 11);
+      break;
+    case 'catapult':
+      catapult(k);
+      if (pack.get('worker')) {
+        soldier(k, pack, -6, 3.5, {}, 0.4, false, 'worker', 8);
+        soldier(k, pack, 6, 4, {}, -0.4, false, 'worker', 8);
+      }
+      break;
+    case 'ironclad':
+      ironclad(k);
       break;
     case 'horseman': {
       const horse = pack.get('horse');
@@ -351,7 +380,9 @@ function packUnit(type: string, embarked: boolean, pack: Pack): Model | null {
       if (!cart) return null;
       const s = fit(cart, 10);
       k.model(cart, 3 - ((cart.min[0] + cart.max[0]) / 2) * s, base(cart, s), -((cart.min[2] + cart.max[2]) / 2) * s, 0, s);
-      soldier(k, pack, -3.5, 1, type === 'settler' ? { weapon: 'spear', ws: 0.6 } : {});
+      const who = type === 'settler' ? 'farmer' : 'merchant';
+      if (pack.get(who)) soldier(k, pack, -3.5, 1, {}, 0, false, who);
+      else soldier(k, pack, -3.5, 1, type === 'settler' ? { weapon: 'spear', ws: 0.6 } : {});
       break;
     }
     case 'galley':
@@ -363,10 +394,72 @@ function packUnit(type: string, embarked: boolean, pack: Pack): Model | null {
     case 'caravel':
       if (!ship('sailShip', 18)) return null;
       break;
-    default:
+    default: {
+      const def = UNITS[type];
+      if (def?.greatPerson && pack.get('king')) {
+        k.cyl(3.4, 3.4, 0.25, '#ffd23f', 0, 0.1, 0, 14);
+        soldier(k, pack, 0, 0, {}, 0, false, 'king', 11);
+        break;
+      }
       return null;
+    }
   }
   return k.build();
+}
+
+/** Catapulta procedural detalhada: chassi, rodas com raios, cavaletes, braço com cesto e pedra. */
+function catapult(k: Kit): void {
+  const W = '#7a5532';
+  const D = '#4a3320';
+  k.box(5.2, 1, 11, W, -2.6, 1.6, 0);
+  k.box(5.2, 1, 11, W, 2.6, 1.6, 0);
+  k.box(6.4, 0.9, 1, D, 0, 1.7, -4.2);
+  k.box(6.4, 0.9, 1, D, 0, 1.7, 4.2);
+  for (const [x, z] of [
+    [-3.6, -3.6],
+    [3.6, -3.6],
+    [-3.6, 3.6],
+    [3.6, 3.6],
+  ]) {
+    k.cyl(1.9, 1.9, 0.5, D, x, 1.9, z, 12, 0, Math.PI / 2);
+    k.box(0.25, 3.6, 0.25, W, x, 0.1, z, 0, 0, 0);
+    k.box(0.25, 0.25, 3.6, W, x, 1.9, z);
+  }
+  // cavaletes em A
+  for (const x of [-2.4, 2.4]) {
+    k.box(0.7, 7, 0.7, W, x, 2, -1.5, 0, 0.32);
+    k.box(0.7, 7, 0.7, W, x, 2, 1.5, 0, -0.32);
+  }
+  k.box(6, 0.8, 0.8, D, 0, 8.2, 0);
+  // braço inclinado para trás, cesto e pedra
+  k.box(0.8, 0.8, 12, W, 0, 7.2, -3.2, 0, 0.62);
+  k.box(2.6, 1, 2.6, D, 0, 10.8, -8.2);
+  k.ball(1.2, '#8a8a8a', 0, 12.6, -8.2, 1);
+  k.box(1.6, 1.6, 1.6, '#5b5b5b', 0, 2.6, 3.4);
+  // cordas
+  k.cyl(0.08, 0.08, 6, '#d9c7a3', 0, 2.6, 2.4, 3, 0.9);
+}
+
+/** Encouraçado procedural: casco blindado, castelo, chaminés, torres de canhão e mastro. */
+function ironclad(k: Kit): void {
+  const HULL = '#4c5156';
+  const DECK = '#6d7278';
+  k.box(6.4, 2.6, 18, HULL, 0, -1.4, 0);
+  k.add(new THREE.ConeGeometry(3.2, 5, 4), HULL, 0, -0.2, 11.4, Math.PI / 2, Math.PI / 4, 0);
+  k.box(6.6, 0.6, 18, '#2b2e31', 0, -1.2, 0);
+  k.box(5.8, 0.4, 17, DECK, 0, 1.2, 0);
+  k.box(3.6, 2.4, 5, '#5b6066', 0, 1.6, -1);
+  k.box(2.8, 1.4, 3, '#7a8087', 0, 4, -1.5);
+  for (const z of [-2.6, 0.6]) {
+    k.cyl(0.7, 0.8, 5.5, '#2b2b2b', 0, 3.8, z, 10);
+    k.cyl(0.85, 0.85, 0.5, '#8a2b1b', 0, 8.8, z, 10);
+  }
+  for (const z of [5.5, -6.5]) {
+    k.cyl(1.7, 1.9, 1.5, 'team', 0, 1.6, z, 12);
+    k.cyl(0.3, 0.3, 4.2, '#2b2b2b', 0, 2.4, z + (z > 0 ? 2.4 : -2.4), 6, Math.PI / 2);
+  }
+  k.cyl(0.18, 0.2, 8, '#3a3a3a', 0, 5.5, -4.5, 5);
+  k.box(1.8, 1.1, 0.12, 'team', 0.9, 12, -4.5);
 }
 
 export function unitModel(type: string, embarked = false, pack?: Pack | null): Model {
@@ -410,19 +503,8 @@ export function unitModel(type: string, embarked = false, pack?: Pack | null): M
       horse(k, 3.4, -1.5, 'spear');
       break;
     case 'catapult':
-      k.box(6, 1.2, 8, WOOD, 0, 1.2, 0);
-      for (const [wx, wz] of [
-        [-3.2, -2.6],
-        [3.2, -2.6],
-        [-3.2, 2.6],
-        [3.2, 2.6],
-      ])
-        k.cyl(1.3, 1.3, 0.5, DARK, wx, 1.1, wz, 8, 0, Math.PI / 2);
-      k.box(0.8, 5, 0.8, WOOD, -2, 2.4, 0.5);
-      k.box(0.8, 5, 0.8, WOOD, 2, 2.4, 0.5);
-      k.box(0.7, 0.7, 10, WOOD, 0, 6, -1, 0, 0.7);
-      k.ball(1.2, '#8a8a8a', 0, 9.6, -4.4);
-      figure(k, -5, 3, 'none', { s: 0.8 });
+      catapult(k);
+      figure(k, -6, 3.5, 'none', { s: 0.8 });
       break;
     case 'tank':
       k.box(8, 3, 11, '#5a6040', 0, 1, 0);
@@ -478,10 +560,7 @@ export function unitModel(type: string, embarked = false, pack?: Pack | null): M
       k.box(1.2, 3, 0.35, 'team', 0, 7, -1.8);
       break;
     case 'ironclad':
-      hull(k, 18, 6, '#55595e', '#6d7278');
-      k.cyl(1.1, 1.1, 6, DARK, 0, 1.6, -1, 8);
-      k.cyl(2.2, 2.2, 1.8, 'team', 0, 1.6, 4.5, 8);
-      k.cyl(0.35, 0.35, 5, DARK, 0, 2.5, 7, 5, Math.PI / 2);
+      ironclad(k);
       break;
     default:
       if (def?.greatPerson) {

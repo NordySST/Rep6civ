@@ -545,7 +545,7 @@ export class Renderer implements MapView {
       this.drawPlacement(state, overlay);
       this.drawAttackTargets(state, overlay);
       this.drawBorders(state, idxs);
-      if (overlay.cityView) this.drawCityView(state, overlay.cityView);
+      if (overlay.cityView) this.drawCityView(state, overlay.cityView, false);
       this.drawPlannedPath(state, overlay);
       this.drawSelectedTile(state, overlay);
     }
@@ -607,6 +607,40 @@ export class Renderer implements MapView {
       if (models || !isKnown(c.pos)) continue;
       const p = tileCenter(state, c.pos);
       if (place(p.x, p.y)) this.drawCamp({ x: p.x, y: p.y - 8 });
+    }
+
+    // visão da cidade (3D): rendimentos, cidadãos e preços em pé, acima de árvores e casas
+    if (models && overlay.cityView) {
+      const v = overlay.cityView;
+      const techs3 = state.players[playerId].techs;
+      for (const i of [...v.workable, ...v.buyable.keys()]) {
+        const c = tileCenter(state, i);
+        if (!place(c.x, c.y)) continue;
+        const y0 = c.y - 22;
+        ctx.fillStyle = 'rgba(10, 16, 24, 0.55)';
+        roundRect(ctx, c.x - 27, y0 - 1, 54, 12, 6);
+        ctx.fill();
+        this.drawYieldPips(tileYields(state.map.tiles[i], techs3), c.x, y0);
+        const cost = v.buyable.get(i);
+        if (cost !== undefined) {
+          ctx.fillStyle = 'rgba(40, 30, 5, 0.92)';
+          roundRect(ctx, c.x - 17, y0 - 17, 34, 14, 5);
+          ctx.fill();
+          ctx.fillStyle = '#ffd76a';
+          ctx.font = '700 10px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`${cost}🪙`, c.x, y0 - 10);
+        } else if (v.worked.has(i)) {
+          ctx.fillStyle = v.locked.has(i) ? '#ffd23f' : '#ffffff';
+          ctx.strokeStyle = '#222';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(c.x, y0 - 9, 5.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
     }
 
     // estandartes das cidades (as casas são 3D)
@@ -1068,7 +1102,7 @@ export class Renderer implements MapView {
     }
   }
 
-  private drawCityView(state: GameState, v: NonNullable<Overlay['cityView']>): void {
+  private drawCityView(state: GameState, v: NonNullable<Overlay['cityView']>, markers = true): void {
     const { ctx } = this;
     for (const i of v.workable) {
       const { x, y } = tileCenter(state, i);
@@ -1076,7 +1110,15 @@ export class Renderer implements MapView {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
         hexPath(ctx, x, y, HEX_SIZE - 2);
         ctx.fill();
+        if (!markers) {
+          // visão 3D: contorno forte (os números ficam em pé, nas figuras)
+          ctx.strokeStyle = v.locked.has(i) ? 'rgba(255, 210, 63, 0.95)' : 'rgba(255, 255, 255, 0.85)';
+          ctx.lineWidth = 3;
+          hexPath(ctx, x, y, HEX_SIZE - 4);
+          ctx.stroke();
+        }
       }
+      if (!markers) continue;
       this.drawYieldPips(tileYields(state.map.tiles[i], state.players[state.currentPlayer].techs), x, y);
       if (v.worked.has(i)) {
         ctx.fillStyle = v.locked.has(i) ? '#ffd23f' : '#ffffff';
@@ -1093,6 +1135,7 @@ export class Renderer implements MapView {
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       hexPath(ctx, x, y, HEX_SIZE - 2);
       ctx.fill();
+      if (!markers) continue;
       this.drawYieldPips(tileYields(state.map.tiles[i], state.players[state.currentPlayer].techs), x, y);
       ctx.fillStyle = 'rgba(40, 30, 5, 0.9)';
       roundRect(ctx, x - 15, y - 22, 30, 13, 5);
