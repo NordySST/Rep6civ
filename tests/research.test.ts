@@ -33,7 +33,7 @@ describe('pesquisa', () => {
     expect(ev).toContainEqual({ type: 'techDone', playerId: 0, id: 'pottery' });
     expect(q.techs).toEqual(['pottery']);
     expect(q.researching).toBeNull();
-    expect(q.science).toBe(5);
+    expect(q.science).toBe(10);
     expect(availableItems(q, 'tech')).toContain('writing');
     void p;
   });

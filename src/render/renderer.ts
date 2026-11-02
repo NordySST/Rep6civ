@@ -31,6 +31,10 @@ export interface Overlay {
     workable: number[];
     buyable: Map<number, number>;
   };
+  /** Posições animadas de unidades (coordenadas de mundo). */
+  unitPositions?: Map<number, { x: number; y: number }>;
+  /** Textos flutuantes (dano etc.). */
+  floaters?: { x: number; y: number; text: string; color: string; alpha: number }[];
   /** Modo de posicionamento de distrito/maravilha: hexágono → rótulo (ex.: "+2"). */
   placement?: { sites: Map<number, string>; chosen?: number };
   /** Hexágonos atacáveis pela seleção atual. */
@@ -294,8 +298,13 @@ export class Renderer {
 
     // unidades (de outros jogadores só se visíveis)
     const byTile = new Map<number, typeof state.units>();
+    const animated: typeof state.units = [];
     for (const u of state.units) {
       if (u.owner !== playerId && !isVisible(u.pos)) continue;
+      if (overlay.unitPositions?.has(u.id)) {
+        animated.push(u);
+        continue;
+      }
       const arr = byTile.get(u.pos) ?? [];
       arr.push(u);
       byTile.set(u.pos, arr);
@@ -316,6 +325,25 @@ export class Renderer {
           ctx.fillText('★', ux - 11, uy - 10);
         }
       });
+    }
+
+    for (const u of animated) {
+      const p = overlay.unitPositions!.get(u.id)!;
+      this.drawUnit(state, u.type, u.owner, p.x, p.y + 2, u.id === overlay.selectedUnitId, u.movesLeft > 0, !!u.fortified);
+    }
+
+    // textos flutuantes
+    for (const f of overlay.floaters ?? []) {
+      ctx.globalAlpha = Math.max(0, f.alpha);
+      ctx.font = '800 14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.strokeText(f.text, f.x, f.y);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.globalAlpha = 1;
     }
 
     // caminho planejado

@@ -20,7 +20,10 @@ export interface NewGameOptions {
   rivals?: number;
   /** Nº de cidades-estado (padrão do tamanho do mapa). */
   cityStates?: number;
+  turnLimit?: number;
 }
+
+export const DEFAULT_TURN_LIMIT = 250;
 
 export function createUnit(state: GameState, type: string, owner: number, pos: number): Unit {
   const u: Unit = { id: state.nextId++, type, owner, pos, movesLeft: UNITS[type].moves, hp: 100, xp: 0, promotions: [] };
@@ -52,6 +55,7 @@ export function makePlayer(id: number, civId: string, tiles: number, extra: Part
     policyChangeAvailable: false,
     envoyTokens: 0,
     gpPoints: {},
+    lifetimeCulture: 0,
     ...extra,
   };
 }
@@ -71,7 +75,7 @@ export function newGame(opts: NewGameOptions): GameState {
   const n = map.tiles.length;
   const state: GameState = {
     schemaVersion: SCHEMA_VERSION,
-    settings: { seed: opts.seed, mapSize: opts.mapSize },
+    settings: { seed: opts.seed, mapSize: opts.mapSize, turnLimit: opts.turnLimit ?? DEFAULT_TURN_LIMIT },
     turn: 1,
     currentPlayer: 0,
     map,

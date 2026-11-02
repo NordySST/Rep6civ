@@ -28,7 +28,7 @@ src/
   data/    Definições de conteúdo (terrenos, características, recursos, maravilhas, unidades,
            edifícios, melhorias, tecnologias, cívicas, governos/políticas, eurecas, promoções, distritos,
            maravilhas mundiais, cidades-estado, religião (panteões, crenças), grandes
-           personalidades,
+           personalidades, projetos, eras,
            civilizações, tamanhos de mapa, rendimentos). Só dados tipados.
   state/   Tipos do estado serializável (types.ts), versão do esquema (version.ts) e
            salvar/carregar com migrações (save.ts).
@@ -44,12 +44,15 @@ src/
            districts.ts (distritos, adjacência, maravilhas mundiais, habilidades únicas),
            economy.ts (manutenção, comodidades/humor), trade.ts (rotas comerciais),
            religion.ts (panteão, fundação, pressão, missionários), greatPeople.ts,
+           victory.ts (vitórias, pontuação, eras),
            diplomacy.ts (contato, guerra/paz, acordos, opinião/agendas, emissários,
            suseranos, território fechado, eliminação),
            game.ts (novo jogo), actions.ts (redutor de ações + fim de turno).
   render/  Canvas 2D: camera.ts (transformações/zoom) e renderer.ts (arte procedural).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
-           menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts.
+           menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
+           prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
+           tutorial.ts (dicas contextuais).
   ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
            as regras fecham a rodada; `proposeDeal` para propostas do humano), civAi.ts
            (pesquisa, governo, produção, colonos, construtores, militares), diplomacyAi.ts
@@ -57,7 +60,8 @@ src/
   main.ts  Ponto de entrada; registra o service worker em produção.
 public/    manifest.webmanifest, sw.js (offline), ícones.
 tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save, cidades,
-           construtores, pesquisa/políticas, combate/bárbaros, diplomacia/IA, distritos/maravilhas).
+           construtores, pesquisa/políticas, combate/bárbaros, diplomacia/IA, distritos/maravilhas,
+           economia/religião/naval, vitórias).
            tests/helpers.ts tem `flatGame()` (mapa de pradaria para testes).
 ```
 
@@ -264,6 +268,28 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   embarcar/desembarcar gasta todo o movimento, defesa embarcada 10, não atacam embarcadas;
   só navios atacam no mar. `canEnterTerrain` centraliza as regras de domínio.
 
+### Vitória e polimento (etapa 8)
+
+- Vitórias (`rules/victory.ts`, checadas no fim do turno; a partida pode continuar depois):
+  Dominação (controlar todas as capitais originais — `city.originalCapitalOf` — com ≥ 2
+  civilizações), Científica (projeto Expedição Celeste, exige todas as tecnologias), Cultural
+  (todas as cívicas e cultura acumulada `lifetimeCulture` ≥ 1000 e ≥ 2× a de cada rival
+  ativo), Religiosa (sua religião na maioria das cidades de cada civilização ativa, ≥ 2) e
+  Pontuação no turno final (`settings.turnLimit`, padrão 250).
+- Pontuação: cidades×5 + população + tecnologias×3 + cívicas×3 + maravilhas×15 +
+  distritos×2 + grandes personalidades×5 + religião (10 + 2 por cidade seguidora).
+- Projetos (`data/projects.ts`, item `kind: 'project'`): Festival Popular (repetível, +60
+  ouro e +30 cultura; também evita cidades ociosas na IA) e Expedição Celeste.
+- Eras por custo da tecnologia mais avançada (Antiga, Clássica ≥ 80, Medieval ≥ 160);
+  evento `eraChanged`.
+- Balanceamento: tecnologias iniciais custam 20.
+- Polimento de UI: tela de vitória/derrota (continuar jogando), Placar e vitórias (toque no
+  turno), dicas de tutorial uma vez por aparelho, efeitos sonoros sintetizados (sem
+  arquivos), animação de movimento e números de dano flutuantes, Configurações (som, dicas,
+  animações — respeita `prefers-reduced-motion` —, texto maior), foco automático e Esc nos
+  diálogos, limite de turnos no Novo jogo. Avisos de outras civilizações só aparecem para
+  quem você conhece (sem vazar informação).
+
 ## Plano das 8 etapas
 
 1. **[CONCLUÍDA] Fundação** — mapa hexagonal procedural com semente (pequeno/médio/grande),
@@ -283,10 +309,21 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
    maravilhas mundiais, habilidades únicas das civilizações (já descritas em `data/civs.ts`).
 7. **[CONCLUÍDA] Economia e sociedade** — ouro/manutenção, amenidades e recursos de luxo, comércio e rotas,
    religião/fé, grandes personagens, unidades navais e exploração marítima.
-8. **Vitória e polimento** — condições de vitória (dominação, ciência, cultura, religião,
+8. **[CONCLUÍDA] Vitória e polimento** — condições de vitória (dominação, ciência, cultura, religião,
    pontuação), eras, tutorial, áudio, animações, acessibilidade, balanceamento e desempenho.
 
 ## Registro por etapa
+
+### Etapa 8 (concluída)
+- Save v8 (migração 7→8: `turnLimit`, `lifetimeCulture`, `originalCapitalOf`, `winner`).
+- Vitórias, pontuação, eras, projetos; IA prioriza a Expedição Celeste e usa o Festival
+  quando ociosa (simulações de 250 turnos terminam em vitória científica por volta do turno
+  150–175, ~20–85 ms por turno no mapa pequeno).
+- UI: vitória/derrota, placar, tutorial, áudio, animações, configurações e acessibilidade.
+- Correções: avisos de cidades/crescimento/capturas de outras civilizações não vazam mais;
+  mensagens internas da IA não aparecem para o humano.
+- Ideias futuras: eras posteriores na árvore (renascença em diante), troca de luxos,
+  combate religioso, mapa com wrap horizontal, multijogador local, mais civilizações.
 
 ### Etapa 7 (concluída)
 - Save v7 (migração 6→7: `tradeRoutes`, `religions`, `gpRecruited`, `gpPoints`, `pressure`).

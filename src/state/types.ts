@@ -113,7 +113,7 @@ export interface BarbarianCamp {
 }
 
 export interface ProductionItem {
-  kind: 'unit' | 'building' | 'district' | 'wonder';
+  kind: 'unit' | 'building' | 'district' | 'wonder' | 'project';
   id: string;
   /** Hexágono escolhido (distritos e maravilhas). */
   tile?: number;
@@ -151,6 +151,8 @@ export interface City {
   /** Religião predominante (id) e pressão religiosa acumulada por religião. */
   religion?: string;
   pressure: Record<string, number>;
+  /** Se foi a capital original de um jogador (para a vitória por dominação). */
+  originalCapitalOf?: number;
 }
 
 export interface Player {
@@ -192,11 +194,23 @@ export interface Player {
   gpPoints: Record<string, number>;
   /** Crença de panteão escolhida. */
   pantheon?: string;
+  /** Cultura total gerada na partida (vitória cultural). */
+  lifetimeCulture: number;
 }
 
 export interface GameSettings {
   seed: string;
   mapSize: MapSizeId;
+  /** Turno final (vitória por pontuação). */
+  turnLimit?: number;
+}
+
+export type VictoryType = 'domination' | 'science' | 'culture' | 'religion' | 'score';
+
+export interface Winner {
+  player: number;
+  type: VictoryType;
+  turn: number;
 }
 
 export interface GameState {
@@ -218,6 +232,8 @@ export interface GameState {
   religions: Religion[];
   /** Grandes personalidades já recrutadas no mundo, por tipo. */
   gpRecruited: Record<string, number>;
+  /** Vencedor (a partida pode continuar depois). */
+  winner?: Winner;
   nextId: number;
   /** Contador para sorteios de combate/IA determinísticos. */
   rngCounter: number;

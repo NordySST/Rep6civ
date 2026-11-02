@@ -19,6 +19,7 @@ export function closeModal(host: ModalHost): void {
 export function openModal(host: ModalHost, title: string, body: Node, opts: { closable?: boolean } = {}): void {
   clear(host.root);
   const closable = opts.closable ?? true;
+  host.root.dataset.closable = closable ? '1' : '0';
   const card = h(
     'div',
     { class: 'modal-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
@@ -32,6 +33,9 @@ export function openModal(host: ModalHost, title: string, body: Node, opts: { cl
   );
   host.root.append(card);
   host.root.hidden = false;
+  // acessibilidade: foco no primeiro controle do diálogo
+  const first = card.querySelector<HTMLElement>('button:not([disabled]), input, select');
+  setTimeout(() => first?.focus({ preventScroll: true }), 0);
 }
 
 export interface NewGameChoice {
@@ -40,6 +44,7 @@ export interface NewGameChoice {
   civId: string;
   rivals?: number;
   cityStates?: number;
+  turnLimit?: number;
 }
 
 export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Partial<NewGameChoice>): HTMLElement {
@@ -56,6 +61,7 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
 
   let rivals: number | undefined = defaults?.rivals;
   let cityStates: number | undefined = defaults?.cityStates;
+  let turnLimit = defaults?.turnLimit ?? 250;
   const countsRow = h('div', { class: 'counts' });
   const counter = (label: string, get: () => number, set: (n: number) => void, max: number) =>
     h(
@@ -71,6 +77,14 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
     countsRow.append(
       counter(T.rivals, () => rivals ?? MAP_SIZES[size].rivals, (n) => (rivals = n), CIVS.length - 1),
       counter(T.cityStatesLabel, () => cityStates ?? MAP_SIZES[size].cityStates, (n) => (cityStates = n), CITY_STATES.length),
+      h(
+        'div',
+        { class: 'counter' },
+        h('span', {}, T.turnLimitLabel),
+        h('button', { class: 'btn icon', 'aria-label': `${T.turnLimitLabel} −`, onclick: () => ((turnLimit = Math.max(100, turnLimit - 50)), renderCounts()) }, '−'),
+        h('strong', {}, String(turnLimit)),
+        h('button', { class: 'btn icon', 'aria-label': `${T.turnLimitLabel} +`, onclick: () => ((turnLimit = Math.min(500, turnLimit + 50)), renderCounts()) }, '+'),
+      ),
     );
   };
 
@@ -158,6 +172,7 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
             civId,
             rivals: rivals ?? MAP_SIZES[size].rivals,
             cityStates: cityStates ?? MAP_SIZES[size].cityStates,
+            turnLimit,
           }),
       },
       T.start,

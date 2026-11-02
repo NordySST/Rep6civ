@@ -17,8 +17,11 @@ export function playEndTurn(prev: GameState): ActionResult {
   const human = state.currentPlayer;
   for (const p of state.players) {
     if (p.isHuman || p.isBarbarian || p.eliminated) continue;
-    runDiplomacy(state, p.id, events);
-    runAiPlayer(state, p.id, events);
+    const aiEvents: GameEvent[] = [];
+    runDiplomacy(state, p.id, aiEvents);
+    runAiPlayer(state, p.id, aiEvents);
+    // mensagens privadas da IA (avisos/erros das próprias ações) não vão para o humano
+    events.push(...aiEvents.filter((e) => e.type !== 'info' && e.type !== 'error'));
     events.push(...checkContacts(state));
   }
   state.currentPlayer = human;
