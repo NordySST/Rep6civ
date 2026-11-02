@@ -64,7 +64,7 @@ import {
 import { loadPrefs, savePrefs, applyPrefs, type Prefs } from './prefs';
 import { play, setSoundEnabled, unlockAudio, type Sfx } from './audio';
 import { TIPS } from './tutorial';
-import { icon } from './icons';
+import { icon, richText } from './icons';
 import { cityAmenities, effectiveLuxuries, maintenanceOf, tradeableLuxuries } from '../rules/economy';
 import { gpCost, gpPerTurn } from '../rules/greatPeople';
 import {
@@ -2633,7 +2633,7 @@ export class App {
   }
 
   toast(msg: string): void {
-    this.el.toast.textContent = msg;
+    this.el.toast.replaceChildren(...richText(msg));
     this.el.toast.classList.add('show');
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => this.el.toast.classList.remove('show'), 2600);

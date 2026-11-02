@@ -1,3 +1,5 @@
+import { richText } from './icons';
+
 type Attrs = Record<string, string | number | boolean | ((e: Event) => void) | undefined>;
 
 /** Criação compacta de elementos DOM. */
@@ -17,7 +19,9 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   }
   for (const c of children) {
     if (c === null || c === undefined || c === false) continue;
-    el.append(typeof c === 'string' ? document.createTextNode(c) : c);
+    // emojis conhecidos viram ícones SVG próprios (exceto em campos de texto)
+    if (typeof c === 'string') el.append(...(tag === 'option' || tag === 'textarea' ? [c] : richText(c)));
+    else el.append(c);
   }
   return el;
 }
