@@ -7,6 +7,11 @@ import type { GameState } from '../state/types';
 import { createSharedUniforms, patchMaterial, type SharedUniforms } from './materials';
 import { TerrainField, WATER_LEVEL } from './terrain';
 import { buildCities, buildRivers, buildTerrain, buildTrees, buildWater, citySignature } from './world';
+import { unitModel, type Model } from './models';
+import { buildStructures, structureSignature } from './structures';
+import { CIV_BY_ID } from '../data/civs';
+import { TERRAINS } from '../data/terrains';
+import { UNITS } from '../data/units';
 
 /**
  * Visão 3D do mapa (WebGL/three.js), carregada sob demanda. Mesma câmera lógica do 2D:
@@ -44,7 +49,22 @@ export class Renderer3D implements MapView {
   private uniforms: SharedUniforms;
   private mats: { terrain: THREE.Material; water: THREE.Material; river: THREE.Material; trees: THREE.Material; city: THREE.Material };
   private world = new THREE.Group();
-  private parts: { terrain?: THREE.Group; water?: THREE.Group; rivers?: THREE.Mesh | null; trees?: THREE.Group; cities?: THREE.Group } = {};
+  private parts: {
+    terrain?: THREE.Group;
+    water?: THREE.Group;
+    rivers?: THREE.Mesh | null;
+    trees?: THREE.Group;
+    cities?: THREE.Group;
+    structures?: THREE.Mesh | null;
+  } = {};
+  private structSig = '';
+  /** Unidades em miniatura (uma cópia, na volta mais próxima da câmera). */
+  private unitLayer = new THREE.Group();
+  private unitObjs = new Map<number, { obj: THREE.Group; key: string; x: number; z: number; yaw: number }>();
+  private models = new Map<string, Model>();
+  private teamMats = new Map<string, THREE.MeshLambertMaterial>();
+  private unitMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  private selRing: THREE.Mesh;
   private copies: THREE.Group[] = [];
   private field?: TerrainField;
   private terrainSig = -1;
@@ -94,6 +114,13 @@ export class Renderer3D implements MapView {
     this.scene.add(sun);
     this.scene.fog = new THREE.Fog(0x22303e, 4000, 9000);
     this.scene.add(this.world);
+    this.scene.add(this.unitLayer);
+    this.selRing = new THREE.Mesh(
+      new THREE.RingGeometry(13, 16.5, 36).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffe680, transparent: true, opacity: 0.8, depthWrite: false }),
+    );
+    this.selRing.renderOrder = 3;
+    this.scene.add(this.selRing);
   }
 
   resize(): void {
@@ -112,6 +139,12 @@ export class Renderer3D implements MapView {
       m.geometry?.dispose();
     });
     Object.values(this.mats).forEach((m) => m.dispose());
+    for (const m of this.models.values()) {
+      m.neutral?.dispose();
+      m.team?.dispose();
+    }
+    this.teamMats.forEach((m) => m.dispose());
+    this.unitMat.dispose();
     this.decalTex.dispose();
     this.uniforms.uFogTex.value.dispose();
     this.gl.dispose();
@@ -207,10 +240,17 @@ export class Renderer3D implements MapView {
       this.parts.trees = buildTrees(this.field!, state, this.mats.trees);
       changed = true;
     }
+    const ss = structureSignature(state);
+    if (changed || ss !== this.structSig) {
+      this.structSig = ss;
+      if (this.parts.structures) this.parts.structures.geometry.dispose();
+      this.parts.structures = buildStructures(this.field!, state, this.mats.trees);
+      changed = true;
+    }
     if (!changed) return;
     this.world.clear();
     const base = new THREE.Group();
-    for (const p of [this.parts.terrain, this.parts.water, this.parts.rivers, this.parts.trees, this.parts.cities]) if (p) base.add(p);
+    for (const p of [this.parts.terrain, this.parts.water, this.parts.rivers, this.parts.trees, this.parts.cities, this.parts.structures]) if (p) base.add(p);
     this.world.add(base);
     // mapa com volta: cópias vizinhas a leste e oeste
     this.copies = [];
@@ -370,6 +410,96 @@ export class Renderer3D implements MapView {
     return out;
   }
 
+  // ------------------------------------------------------------------ unidades
+
+  private teamMat(owner: number, state: GameState): THREE.MeshLambertMaterial {
+    const color = CIV_BY_ID[state.players[owner]?.civId]?.color ?? '#888888';
+    let m = this.teamMats.get(color);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({ color: new THREE.Color(color), flatShading: true });
+      this.teamMats.set(color, m);
+    }
+    return m;
+  }
+
+  private model(type: string, embarked: boolean): Model {
+    const key = `${type}${embarked ? '@boat' : ''}`;
+    let m = this.models.get(key);
+    if (!m) {
+      m = unitModel(type, embarked);
+      this.models.set(key, m);
+    }
+    return m;
+  }
+
+  /** Posiciona as miniaturas: pilhas lado a lado, animações, volta do mapa e direção do passo. */
+  private updateUnits(state: GameState, cam: Camera, vis: Uint8Array, overlay: Overlay): void {
+    const me = state.currentPlayer;
+    const P = state.map.wrap ? worldPeriod(state) : 0;
+    const shown = new Set<number>();
+    const byTile = new Map<number, typeof state.units>();
+    for (const u of state.units) {
+      if (u.owner !== me && !overlay.revealAll && !vis[u.pos]) continue;
+      byTile.set(u.pos, [...(byTile.get(u.pos) ?? []), u]);
+    }
+    let selPos: { x: number; z: number } | null = null;
+    for (const [pos, units] of byTile) {
+      units.sort((a, b) => (UNITS[a.type].class === 'civilian' ? -1 : 1) - (UNITS[b.type].class === 'civilian' ? -1 : 1));
+      const c = nearCenter(state, pos, { x: cam.x, y: cam.y });
+      const water = TERRAINS[state.map.tiles[pos].terrain].isWater;
+      units.forEach((u, k) => {
+        const anim = overlay.unitPositions?.get(u.id);
+        let x = anim ? anim.x : c.x + (units.length > 1 ? (k === 0 ? -11 : 11) : 0);
+        const z = anim ? anim.y + 2 : c.y + (units.length > 1 ? 3 : 0);
+        if (P) {
+          while (x - cam.x > P / 2) x -= P;
+          while (cam.x - x > P / 2) x += P;
+        }
+        const embarked = water && UNITS[u.type].domain !== 'sea';
+        const key = `${u.type}|${embarked ? 1 : 0}|${u.owner}`;
+        let rec = this.unitObjs.get(u.id);
+        if (!rec || rec.key !== key) {
+          if (rec) this.unitLayer.remove(rec.obj);
+          const m = this.model(u.type, embarked);
+          const obj = new THREE.Group();
+          if (m.neutral) obj.add(new THREE.Mesh(m.neutral, this.unitMat));
+          if (m.team) obj.add(new THREE.Mesh(m.team, this.teamMat(u.owner, state)));
+          const yaw = 0.35 - 0.7 * ((u.id * 0.618) % 1);
+          rec = { obj, key, x, z, yaw };
+          this.unitObjs.set(u.id, rec);
+          this.unitLayer.add(obj);
+        }
+        // vira para a direção do movimento
+        const dx = x - rec.x;
+        const dz = z - rec.z;
+        if (Math.hypot(dx, dz) > 0.4 && Math.hypot(dx, dz) < 200) rec.yaw = Math.atan2(dx, dz);
+        rec.x = x;
+        rec.z = z;
+        const sea = water || UNITS[u.type].domain === 'sea';
+        const y = sea ? WATER_LEVEL + 0.6 : this.groundY(x, z) - 0.2;
+        rec.obj.position.set(x, y, z);
+        rec.obj.rotation.y = rec.yaw;
+        rec.obj.scale.setScalar(UNITS[u.type].domain === 'sea' || embarked ? 1.9 : 1.75);
+        shown.add(u.id);
+        if (u.id === overlay.selectedUnitId) selPos = { x, z };
+      });
+    }
+    for (const [id, rec] of this.unitObjs) {
+      if (shown.has(id)) continue;
+      this.unitLayer.remove(rec.obj);
+      this.unitObjs.delete(id);
+    }
+    // anel pulsante sob a unidade selecionada
+    const sp = selPos as { x: number; z: number } | null;
+    this.selRing.visible = !!sp;
+    if (sp) {
+      const ph = overlay.pulse === undefined ? 0 : Math.sin(overlay.pulse * Math.PI * 2);
+      this.selRing.position.set(sp.x, Math.max(this.groundY(sp.x, sp.z), WATER_LEVEL) + 0.8, sp.z);
+      this.selRing.scale.setScalar(1 + 0.06 * ph);
+      (this.selRing.material as THREE.MeshBasicMaterial).opacity = 0.65 + 0.25 * ph;
+    }
+  }
+
   // ------------------------------------------------------------------ quadro
 
   draw(state: GameState, cam: Camera, vis: Uint8Array, overlay: Overlay): void {
@@ -380,6 +510,7 @@ export class Renderer3D implements MapView {
     this.placeCamera(cam);
     this.updateFog(state, vis, !!overlay.revealAll);
     this.updateDecal(state, vis, overlay);
+    this.updateUnits(state, cam, vis, overlay);
     this.gl.render(this.scene, this.camera);
 
     // figuras em pé no canvas de cima
@@ -399,6 +530,6 @@ export class Renderer3D implements MapView {
       ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * (p.sx - k * wx), dpr * (p.sy - k * wy));
       return true;
     };
-    this.sprites.drawSprites(state, vis, overlay, this.visibleTiles(state), place, cam.zoom);
+    this.sprites.drawSprites(state, vis, overlay, this.visibleTiles(state), place, cam.zoom, true);
   }
 }
