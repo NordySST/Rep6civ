@@ -57,7 +57,7 @@ export const TECHS: TechDef[] = [
     name: 'Arquearia',
     cost: 50,
     prereqs: ['animal-husbandry'],
-    description: 'Base para unidades à distância (etapa de combate).',
+    description: 'Libera o Arqueiro.',
     boost: { description: 'Tenha 2 guerreiros.', condition: { type: 'units', unit: 'warrior', count: 2 } },
   },
   {
@@ -65,7 +65,7 @@ export const TECHS: TechDef[] = [
     name: 'Trabalho em Bronze',
     cost: 50,
     prereqs: ['mining'],
-    description: 'Revela Ferro.',
+    description: 'Libera Lanceiro e Espadachim. Revela Ferro.',
     boost: { description: 'Construa uma mina.', condition: { type: 'improvements', improvement: 'mine', count: 1 } },
   },
   {
@@ -73,7 +73,7 @@ export const TECHS: TechDef[] = [
     name: 'Alvenaria',
     cost: 50,
     prereqs: ['mining'],
-    description: 'Técnicas de pedra para muralhas (etapa de combate).',
+    description: 'Libera as Muralhas.',
     boost: { description: 'Construa uma pedreira.', condition: { type: 'improvements', improvement: 'quarry', count: 1 } },
   },
   {
@@ -89,7 +89,7 @@ export const TECHS: TechDef[] = [
     name: 'Equitação',
     cost: 80,
     prereqs: ['animal-husbandry'],
-    description: 'Domínio do cavalo para unidades rápidas.',
+    description: 'Libera o Cavaleiro.',
     boost: { description: 'Construa uma pastagem.', condition: { type: 'improvements', improvement: 'pasture', count: 1 } },
   },
   {
@@ -129,7 +129,7 @@ export const TECHS: TechDef[] = [
     name: 'Engenharia',
     cost: 160,
     prereqs: ['wheel'],
-    description: 'Libera a Oficina.',
+    description: 'Libera a Oficina e a Catapulta.',
     boost: { description: 'Construa um Moinho d’Água.', condition: { type: 'buildings', building: 'watermill', count: 1 } },
   },
   {

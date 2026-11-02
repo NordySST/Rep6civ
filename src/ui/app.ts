@@ -32,6 +32,18 @@ import {
   workableTiles,
 } from '../rules/cities';
 import { canFoundCity } from '../rules/city';
+import {
+  attackTargets,
+  canPromote,
+  cityAttackTargets,
+  cityMaxHp,
+  cityStrength,
+  previewAttack,
+  promotionOptions,
+  unitRange,
+  xpForNext,
+} from '../rules/combat';
+import { PROMOTION_BY_ID } from '../data/promotions';
 import { newGame, turnYear } from '../rules/game';
 import { findPath, reachableThisTurn } from '../rules/movement';
 import { describeTile, isPassableLand, tileYields, visibleResource } from '../rules/tiles';
@@ -66,6 +78,8 @@ export class App {
   private selectedTile: number | undefined;
   private selectedCityId: number | undefined;
   private pendingBuyTile: number | undefined;
+  /** Alvo de ataque aguardando confirmação (unidade ou cidade selecionada). */
+  private pendingAttack: number | undefined;
   /** Turno em que o jogador já viu o aviso de políticas (só UI). */
   private policyPromptSeenTurn = -1;
   private pendingPath: { target: number; path: number[]; turns: number } | undefined;
@@ -133,6 +147,8 @@ export class App {
         pathTurns: this.pendingPath?.turns ?? this.pathTurnsForSelected(),
         revealAll: this.revealAll,
         cityView: this.cityViewOverlay(),
+        attackTargets: this.currentAttackTargets(),
+        pendingAttack: this.pendingAttack,
         cityInfo: this.cityInfo(),
       };
       this.renderer.draw(this.state, this.cam, this.vis, overlay);
@@ -199,6 +215,24 @@ export class App {
         return T.borderGrew(cname(ev.cityId));
       case 'info':
         return ev.message;
+      case 'combat': {
+        const atk = ev.attackerType === 'city' ? T.cityWord : UNITS[ev.attackerType]?.name ?? ev.attackerType;
+        const mine = ev.attackerOwner === s.currentPlayer;
+        const theirs = ev.defenderOwner === s.currentPlayer;
+        if (!mine && !theirs) return null;
+        let m = T.combatMsg(atk, ev.targetName, ev.damageToTarget, ev.damageToAttacker, !mine);
+        if (ev.targetKilled) m += ' ' + T.killed(ev.targetName);
+        if (ev.attackerKilled) m += ' ' + T.killed(atk);
+        return m;
+      }
+      case 'captured':
+        return ev.by === s.currentPlayer ? T.capturedMsg(UNITS[ev.unitType]?.name ?? ev.unitType) : T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType);
+      case 'cityCaptured':
+        return T.cityCapturedMsg(ev.name);
+      case 'campCleared':
+        return ev.by === s.currentPlayer ? T.campCleared(ev.gold) : null;
+      case 'unitLost':
+        return ev.owner === s.currentPlayer ? T.lostCivilian(UNITS[ev.unitType]?.name ?? ev.unitType) : null;
       case 'techDone':
         return ev.playerId === s.currentPlayer ? T.techDone(TECH_BY_ID[ev.id]?.name ?? ev.id) : null;
       case 'civicDone':
@@ -245,7 +279,70 @@ export class App {
     return m;
   }
 
+  private currentAttackTargets(): Set<number> | undefined {
+    const s = this.state;
+    if (!s) return undefined;
+    const u = this.selectedUnit();
+    if (u) {
+      const t = attackTargets(s, u);
+      return t.length ? new Set(t) : undefined;
+    }
+    const c = this.selectedCity();
+    if (c && c.owner === s.currentPlayer) {
+      const t = cityAttackTargets(s, c);
+      return t.length ? new Set(t) : undefined;
+    }
+    return undefined;
+  }
+
+  private confirmAttack(): void {
+    const s = this.state;
+    const target = this.pendingAttack;
+    if (!s || target === undefined) return;
+    this.pendingAttack = undefined;
+    const u = this.selectedUnit();
+    const c = this.selectedCity();
+    if (u) {
+      if (this.dispatch({ type: 'attack', unitId: u.id, target })) {
+        const after = this.selectedUnit();
+        if (!after || after.movesLeft <= 0) {
+          if (!this.selectNextUnit()) this.selectUnit(undefined);
+        } else this.renderHud();
+      }
+    } else if (c) {
+      if (this.dispatch({ type: 'cityAttack', cityId: c.id, target })) this.renderHud();
+    }
+    this.invalidate();
+  }
+
+  private attackPreviewLines(): HTMLElement[] {
+    const s = this.state!;
+    const target = this.pendingAttack;
+    if (target === undefined) return [];
+    const u = this.selectedUnit();
+    const c = this.selectedCity();
+    const tname = (() => {
+      const city = s.cities.find((x) => x.pos === target);
+      if (city) return city.name;
+      const en = s.units.find((x) => x.pos === target && x.owner !== s.currentPlayer);
+      return en ? `${UNITS[en.type].name} (${en.hp}❤)` : '?';
+    })();
+    if (u) {
+      const p = previewAttack(s, u, target);
+      if (!p) return [];
+      if (p.defenseStrength === 0) return [h('small', { class: 'hint' }, T.capturePreview(tname))];
+      return [
+        h('small', { class: 'hint' }, T.attackPreview(tname, p.attackStrength, p.defenseStrength)),
+        h('small', { class: 'hint' }, T.damagePreview(p.damageToTarget, p.damageToAttacker)),
+        h('small', { class: 'muted' }, T.confirmAttack),
+      ];
+    }
+    if (c) return [h('small', { class: 'hint' }, T.cityAttackPreview(tname, cityStrength(s, c))), h('small', { class: 'muted' }, T.confirmAttack)];
+    return [];
+  }
+
   private selectCity(id: number | undefined, center = false): void {
+    this.pendingAttack = undefined;
     this.selectedCityId = id;
     this.pendingBuyTile = undefined;
     if (id !== undefined) {
@@ -303,6 +400,7 @@ export class App {
   }
 
   private selectUnit(id: number | undefined, center = false): void {
+    this.pendingAttack = undefined;
     this.selectedUnitId = id;
     if (id !== undefined) {
       this.selectedCityId = undefined;
@@ -378,6 +476,21 @@ export class App {
     const s = this.state;
     const me = s.currentPlayer;
     const sel = this.selectedUnit();
+
+    // ataque: primeiro toque mostra a previsão, segundo confirma
+    const targets = this.currentAttackTargets();
+    if (targets?.has(idx)) {
+      if (this.pendingAttack === idx) {
+        this.confirmAttack();
+      } else {
+        this.pendingAttack = idx;
+        this.pendingPath = undefined;
+        this.renderHud();
+        this.invalidate();
+      }
+      return;
+    }
+    this.pendingAttack = undefined;
 
     // visão da cidade: fixar cidadãos / comprar hexágonos
     const city = this.selectedCity();
@@ -603,12 +716,24 @@ export class App {
         actions.push(h('button', { class: 'btn', onclick: () => this.unitAction({ type: 'buildRoad', unitId: u.id }) }, '🛤 ' + T.road));
       }
     }
+    if (canPromote(u)) {
+      actions.unshift(h('button', { class: 'btn primary', onclick: () => this.showPromotions(u) }, '★ ' + T.promote));
+    }
+    if (this.pendingAttack !== undefined) {
+      actions.unshift(h('button', { class: 'btn danger', onclick: () => this.confirmAttack() }, '⚔ ' + T.attack));
+    }
     actions.push(h('button', { class: 'btn', onclick: () => this.skipSelected() }, '⏭ ' + T.skip));
 
     const info: (HTMLElement | string)[] = [
       h('strong', {}, `${def.glyph} ${def.name}`),
       h('small', {}, `${T.moves}: ${fmt(u.movesLeft)}/${def.moves}${u.fortified ? ' · Fortificado' : ''}${def.charges ? ` · ${T.charges}: ${u.charges ?? 0}` : ''}`),
     ];
+    if (def.class === 'military') {
+      const ranged = def.rangedStrength ? ` · 🏹 ${def.rangedStrength} (${T.range} ${unitRange(u)})` : '';
+      const promos = u.promotions.length ? ` · ${u.promotions.map((p) => PROMOTION_BY_ID[p]?.name).join(', ')}` : '';
+      info.push(h('small', {}, `❤ ${u.hp}/100 · ⚔ ${def.strength}${ranged} · XP ${u.xp}/${xpForNext(u)}${promos}`));
+    } else if (u.hp < 100) info.push(h('small', {}, `❤ ${u.hp}/100`));
+    info.push(...this.attackPreviewLines());
     if (def.charges && u.movesLeft > 0) {
       const b = availableImprovements(s, u);
       if (!b.length && !canBuildRoad(s, u).ok && s.map.tiles[u.pos].owner !== u.owner) info.push(h('small', { class: 'muted' }, 'Mova o construtor para o seu território.'));
@@ -680,8 +805,15 @@ export class App {
           : `⚒ ${T.noProduction}`,
       ),
       h('small', { class: 'muted' }, `🎭 ${T.border}: ${Math.floor(c.cultureStored)}/${borderThreshold(c.cultureTiles)} · ${T.cityHint}`),
+      h(
+        'small',
+        {},
+        `❤ ${c.hp}/${cityMaxHp(c)} · 🛡 ${cityStrength(s, c)}${c.buildings.includes('walls') ? ` · ${c.rangedUsed ? T.cityAttacked : T.cityCanAttack}` : ''}`,
+      ),
+      ...this.attackPreviewLines(),
     ];
     const actions: HTMLElement[] = [
+      ...(this.pendingAttack !== undefined ? [h('button', { class: 'btn danger', onclick: () => this.confirmAttack() }, '🏹 ' + T.attack)] : []),
       h('button', { class: `btn ${item ? '' : 'primary'}`, onclick: () => this.showProduction() }, '⚒ ' + T.production),
       h(
         'button',
@@ -812,6 +944,32 @@ export class App {
     const slots = governmentSlots(p.government);
     const pols = availablePolicies(p).filter((id) => !p.policies.includes(id));
     return slots.some((sl, i) => !p.policies[i] && pols.some((id) => canSlotPolicy(sl, id)));
+  }
+
+  private showPromotions(u: Unit): void {
+    const host = this.modalHost();
+    const body = h(
+      'div',
+      { class: 'form' },
+      h('small', { class: 'muted' }, T.promoteHint),
+      ...promotionOptions(u).map((p) =>
+        h(
+          'button',
+          {
+            class: 'tree-card available',
+            onclick: () => {
+              if (this.dispatch({ type: 'promote', unitId: u.id, promotion: p.id })) {
+                closeModal(host);
+                if (!this.selectNextUnit()) this.renderHud();
+              }
+            },
+          },
+          h('strong', {}, `★ ${p.name}`),
+          h('small', {}, p.description),
+        ),
+      ),
+    );
+    openModal(host, `${T.promote} — ${UNITS[u.type].name}`, body);
   }
 
   private showTree(kind: TreeKind): void {
@@ -957,6 +1115,14 @@ export class App {
       .join('  ');
     lines.push(h('small', {}, `${T.yields}: ${ys || '—'}`));
     if (!isPassableLand(t) && t.terrain !== 'coast' && t.terrain !== 'ocean') lines.push(h('small', { class: 'muted' }, T.impassable));
+    if (s.camps.some((c) => c.pos === idx)) lines.push(h('small', { class: 'danger-text' }, '⛺ ' + T.barbarianCamp));
+    const vis = this.revealAll || this.vis[idx] === 1;
+    for (const en of s.units.filter((x) => x.pos === idx && x.owner !== s.currentPlayer)) {
+      if (!vis) break;
+      const d = UNITS[en.type];
+      const civ = CIV_BY_ID[s.players[en.owner].civId];
+      lines.push(h('small', { class: 'danger-text' }, `${d.glyph} ${d.name} (${civ?.name}) · ❤ ${en.hp} · ⚔ ${d.strength}${d.rangedStrength ? ` · 🏹 ${d.rangedStrength}` : ''}`));
+    }
     const city = s.cities.find((c) => c.pos === idx);
     if (city) lines.unshift(h('strong', {}, `${city.isCapital ? '★ ' : ''}${city.name} — ${T.population} ${city.population}`));
     if (t.owner !== undefined) {

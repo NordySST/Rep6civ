@@ -4,6 +4,7 @@ import { UNITS } from '../data/units';
 import type { GameState, Player, Unit } from '../state/types';
 import { SCHEMA_VERSION } from '../state/version';
 import { neighbors } from './hex';
+import { maxCamps, spawnCamp } from './barbarians';
 import { findStartPositions, generateMap } from './mapgen';
 import { isPassableLand } from './tiles';
 import { revealForPlayer } from './visibility';
@@ -15,10 +16,35 @@ export interface NewGameOptions {
 }
 
 export function createUnit(state: GameState, type: string, owner: number, pos: number): Unit {
-  const u: Unit = { id: state.nextId++, type, owner, pos, movesLeft: UNITS[type].moves };
+  const u: Unit = { id: state.nextId++, type, owner, pos, movesLeft: UNITS[type].moves, hp: 100, xp: 0, promotions: [] };
   if (UNITS[type].charges) u.charges = UNITS[type].charges;
   state.units.push(u);
   return u;
+}
+
+export function barbarianPlayer(id: number, tiles: number): Player {
+  return {
+    id,
+    civId: 'barbarian',
+    isHuman: false,
+    isBarbarian: true,
+    explored: new Array(tiles).fill(0),
+    citiesFounded: 0,
+    gold: 0,
+    science: 0,
+    culture: 0,
+    faith: 0,
+    techs: [],
+    researching: null,
+    techProgress: {},
+    civics: [],
+    researchingCivic: null,
+    civicProgress: {},
+    boosts: [],
+    government: null,
+    policies: [],
+    policyChangeAvailable: false,
+  };
 }
 
 export function newGame(opts: NewGameOptions): GameState {
@@ -54,13 +80,18 @@ export function newGame(opts: NewGameOptions): GameState {
     players: [human],
     units: [],
     cities: [],
+    camps: [],
     nextId: 1,
+    rngCounter: 0,
   };
+  state.players.push(barbarianPlayer(1, map.tiles.length));
   const [start] = findStartPositions(map, 1, opts.seed);
   createUnit(state, 'settler', 0, start);
   const adj = neighbors(map, start).filter((n) => n >= 0 && isPassableLand(map.tiles[n]));
   createUnit(state, 'warrior', 0, adj[0] ?? start);
   revealForPlayer(state, 0);
+  // acampamentos bárbaros iniciais, longe do jogador
+  for (let k = 0; k < Math.max(1, maxCamps(state) - 1); k++) spawnCamp(state, [start]);
   return state;
 }
 

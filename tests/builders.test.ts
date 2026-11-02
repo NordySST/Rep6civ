@@ -11,10 +11,10 @@ import { flatGame } from './helpers';
 
 function setup() {
   const s = flatGame(16, 12);
-  s.units.push({ id: 500, type: 'settler', owner: 0, pos: 5 * 16 + 6, movesLeft: 2 });
+  s.units.push({ id: 500, type: 'settler', owner: 0, pos: 5 * 16 + 6, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
   const city = foundCity(s, s.units[0]);
   const tile = neighbor(s.map, city.pos, 0);
-  s.units.push({ id: 600, type: 'builder', owner: 0, pos: tile, movesLeft: 2, charges: 3 });
+  s.units.push({ id: 600, type: 'builder', owner: 0, pos: tile, movesLeft: 2, charges: 3, hp: 100, xp: 0, promotions: [] });
   return { s, city, tile };
 }
 

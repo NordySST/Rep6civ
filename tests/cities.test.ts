@@ -22,7 +22,7 @@ import type { GameState } from '../src/state/types';
 import { flatGame } from './helpers';
 
 function withCity(s = flatGame(16, 12), pos = 5 * 16 + 6) {
-  s.units.push({ id: 500, type: 'settler', owner: 0, pos, movesLeft: 2 });
+  s.units.push({ id: 500, type: 'settler', owner: 0, pos, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
   const city = foundCity(s, s.units[0]);
   return { s, city };
 }

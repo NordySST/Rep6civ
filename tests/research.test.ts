@@ -12,7 +12,7 @@ import { flatGame } from './helpers';
 
 function setup() {
   const s = flatGame(16, 12);
-  s.units.push({ id: 500, type: 'settler', owner: 0, pos: 5 * 16 + 6, movesLeft: 2 });
+  s.units.push({ id: 500, type: 'settler', owner: 0, pos: 5 * 16 + 6, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
   const city = foundCity(s, s.units[0]);
   return { s, city, p: s.players[0] };
 }
@@ -68,7 +68,7 @@ describe('eurecas e inspirações', () => {
     const a = neighbor(s.map, city.pos, 0);
     const b = neighbor(s.map, city.pos, 3);
     s.map.tiles[a].improvement = 'farm';
-    s.units.push({ id: 600, type: 'builder', owner: 0, pos: b, movesLeft: 2, charges: 3 });
+    s.units.push({ id: 600, type: 'builder', owner: 0, pos: b, movesLeft: 2, charges: 3, hp: 100, xp: 0, promotions: [] });
     const { events, state } = applyAction(s, { type: 'buildImprovement', unitId: 600, improvement: 'farm' });
     expect(events).toContainEqual({ type: 'boost', playerId: 0, kind: 'tech', id: 'irrigation' });
     expect(state.players[0].boosts).toContain('irrigation');
@@ -88,7 +88,7 @@ describe('desbloqueios por tecnologia', () => {
     const { s, city, p } = setup();
     const t = neighbor(s.map, city.pos, 0);
     s.map.tiles[t].hills = true;
-    s.units.push({ id: 600, type: 'builder', owner: 0, pos: t, movesLeft: 2, charges: 3 });
+    s.units.push({ id: 600, type: 'builder', owner: 0, pos: t, movesLeft: 2, charges: 3, hp: 100, xp: 0, promotions: [] });
     const b = s.units.find((u) => u.id === 600)!;
     expect(availableImprovements(s, b)).toEqual(['farm']);
     p.techs.push('mining');
@@ -159,7 +159,7 @@ describe('cívicas, governo e políticas', () => {
     p.civics.push('early-empire', 'military-tradition');
     p.policies = ['pathfinders', 'land-surveyors'];
     expect(tilePurchaseCost(s, city, tile)).toBe(Math.round(full / 2));
-    s.units.push({ id: 700, type: 'scout', owner: 0, pos: 0, movesLeft: 0 });
+    s.units.push({ id: 700, type: 'scout', owner: 0, pos: 0, movesLeft: 0, hp: 100, xp: 0, promotions: [] });
     expect(maxMoves(s, s.units.find((u) => u.id === 700)!)).toBe(4);
   });
 

@@ -1,6 +1,7 @@
 import { ROAD_MOVE_COST } from '../data/improvements';
 import { UNITS } from '../data/units';
 import type { GameState, Unit } from '../state/types';
+import { enemyZoc, promotionMoves } from './combat';
 import { modifiersFor } from './effects';
 import { directionTo, distance, neighbor } from './hex';
 import { enterCost, isPassableLand, riverOnEdge } from './tiles';
@@ -14,7 +15,11 @@ import { enterCost, isPassableLand, riverOnEdge } from './tiles';
  *  - unidades não entram em hexágonos ocupados por outros jogadores.
  */
 
-export function stepCost(state: GameState, from: number, to: number): number {
+/**
+ * Custo de entrar em `to` vindo de `from`. Com `zoc` (zona de controle inimiga),
+ * mover-se de um hexágono sob ZOC para outro sob ZOC consome todo o movimento.
+ */
+export function stepCost(state: GameState, from: number, to: number, zoc?: Set<number>): number {
   const { map } = state;
   const t = map.tiles[to];
   const base = enterCost(t);
@@ -22,14 +27,15 @@ export function stepCost(state: GameState, from: number, to: number): number {
   const dir = directionTo(map, from, to);
   if (dir < 0) return Infinity;
   // estradas (centros de cidade contam como estrada) ignoram terreno e rios
-  if (hasRoad(state, from) && hasRoad(state, to)) return ROAD_MOVE_COST;
-  if (riverOnEdge(map.tiles[from], dir)) return Math.max(base, RIVER_CROSSING_COST);
+  const zocStop = !!zoc && zoc.has(from) && zoc.has(to);
+  if (hasRoad(state, from) && hasRoad(state, to) && !zocStop) return ROAD_MOVE_COST;
+  if (riverOnEdge(map.tiles[from], dir) || zocStop) return Math.max(base, RIVER_CROSSING_COST);
   return base;
 }
 
 /** Movimento máximo da unidade (definição + bônus de políticas). */
 export function maxMoves(state: GameState, unit: Unit): number {
-  return UNITS[unit.type].moves + (modifiersFor(state, unit.owner).extraMoves[unit.type] ?? 0);
+  return UNITS[unit.type].moves + (modifiersFor(state, unit.owner).extraMoves[unit.type] ?? 0) + promotionMoves(unit);
 }
 
 export function hasRoad(state: GameState, idx: number): boolean {
@@ -57,7 +63,7 @@ export function moveOneStep(state: GameState, unit: Unit, to: number): boolean {
   if (unit.movesLeft <= 0) return false;
   if (distance(state.map, unit.pos, to) !== 1) return false;
   if (!canOccupy(state, unit, to)) return false;
-  const cost = stepCost(state, unit.pos, to);
+  const cost = stepCost(state, unit.pos, to, enemyZoc(state, unit.owner));
   if (!isFinite(cost)) return false;
   unit.pos = to;
   unit.movesLeft = Math.max(0, unit.movesLeft - cost);
@@ -118,6 +124,7 @@ export interface PathResult {
  */
 export function simulateTurns(state: GameState, unit: Unit, path: number[]): number {
   const max = maxMoves(state, unit);
+  const zoc = enemyZoc(state, unit.owner);
   let left = unit.movesLeft;
   let turns = 1;
   let pos = unit.pos;
@@ -126,7 +133,7 @@ export function simulateTurns(state: GameState, unit: Unit, path: number[]): num
       turns++;
       left = max;
     }
-    left = Math.max(0, left - stepCost(state, pos, step));
+    left = Math.max(0, left - stepCost(state, pos, step, zoc));
     pos = step;
   }
   return turns;
@@ -136,13 +143,26 @@ export function simulateTurns(state: GameState, unit: Unit, path: number[]): num
  * Caminho de menor custo. Hexágonos inexplorados pelo dono são tratados como
  * transitáveis com custo 1 (o jogador não conhece o terreno).
  */
-export function findPath(state: GameState, unit: Unit, target: number): PathResult | null {
+export interface PathOptions {
+  /** Conhece todo o terreno (bárbaros/IA). */
+  ignoreFog?: boolean;
+  /** O destino pode estar ocupado por inimigo (para aproximar e atacar). */
+  allowEnemyGoal?: boolean;
+}
+
+export function findPath(state: GameState, unit: Unit, target: number, opts: PathOptions = {}): PathResult | null {
   const { map } = state;
   if (target === unit.pos) return null;
-  const explored = state.players[unit.owner]?.explored;
+  const explored = opts.ignoreFog ? undefined : state.players[unit.owner]?.explored;
   const known = (i: number) => !explored || explored[i] === 1;
-  if (known(target) && !canOccupy(state, unit, target)) return null;
+  if (known(target) && !canOccupy(state, unit, target)) {
+    const enemyThere =
+      state.units.some((o) => o.pos === target && o.owner !== unit.owner) ||
+      state.cities.some((c) => c.pos === target && c.owner !== unit.owner);
+    if (!(opts.allowEnemyGoal && enemyThere && isPassableLand(map.tiles[target]))) return null;
+  }
   const max = maxMoves(state, unit);
+  const zoc = enemyZoc(state, unit.owner);
 
   const g = new Map<number, number>([[unit.pos, 0]]);
   const prev = new Map<number, number>();
@@ -168,7 +188,7 @@ export function findPath(state: GameState, unit: Unit, target: number): PathResu
           const enemy = state.units.some((o) => o.pos === nb && o.owner !== unit.owner);
           if (enemy) continue;
         }
-        cost = Math.min(stepCost(state, cur, nb), max);
+        cost = Math.min(stepCost(state, cur, nb, zoc), max);
       }
       const ng = g.get(cur)! + cost;
       if (ng < (g.get(nb) ?? Infinity)) {
@@ -190,6 +210,7 @@ export function reachableThisTurn(state: GameState, unit: Unit): Set<number> {
   const out = new Set<number>();
   if (unit.movesLeft <= 0) return out;
   const { map } = state;
+  const zoc = enemyZoc(state, unit.owner);
   const best = new Map<number, number>([[unit.pos, unit.movesLeft]]);
   const queue = [unit.pos];
   while (queue.length) {
@@ -200,8 +221,9 @@ export function reachableThisTurn(state: GameState, unit: Unit): Set<number> {
       const nb = neighbor(map, cur, d);
       if (nb < 0) continue;
       if (state.units.some((o) => o.pos === nb && o.owner !== unit.owner)) continue;
+      if (state.cities.some((c) => c.pos === nb && c.owner !== unit.owner)) continue;
       if (!isPassableLand(map.tiles[nb])) continue;
-      const rest = Math.max(0, left - stepCost(state, cur, nb));
+      const rest = Math.max(0, left - stepCost(state, cur, nb, zoc));
       if (rest > (best.get(nb) ?? -1)) {
         best.set(nb, rest);
         queue.push(nb);

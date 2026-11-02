@@ -366,3 +366,8 @@ input[type='text'] {
   padding: 0 8px;
 }
 .form .hint { color: var(--accent); }
+
+/* ---------- etapa 4: combate ---------- */
+.btn.danger { background: #c0392b; color: #fff; border-color: transparent; }
+.btn.danger:hover:not(:disabled) { background: #d84a3b; }
+.danger-text { color: #ff8a7a; }

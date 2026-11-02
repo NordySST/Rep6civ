@@ -2,6 +2,7 @@ import { FEATURES } from '../data/features';
 import { HILLS } from '../data/terrains';
 import { UNITS } from '../data/units';
 import type { GameMap, GameState } from '../state/types';
+import { promotionSight } from './combat';
 import { distance, hexLine, tilesInRadius } from './hex';
 
 /** Raio de visão das cidades. */
@@ -50,7 +51,7 @@ export function computeVisibility(state: GameState, playerId: number): Uint8Arra
   for (const u of state.units) {
     if (u.owner !== playerId) continue;
     const def = UNITS[u.type];
-    const radius = def.sight + (map.tiles[u.pos].hills ? HILLS.sightBonus : 0);
+    const radius = def.sight + (map.tiles[u.pos].hills ? HILLS.sightBonus : 0) + promotionSight(u);
     for (const i of visibleFrom(map, u.pos, radius)) vis[i] = 1;
   }
   for (const c of state.cities) {

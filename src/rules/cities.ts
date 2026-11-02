@@ -1,6 +1,7 @@
 import { BUILDINGS, type BuildingDef } from '../data/buildings';
 import { TECH_BY_ID } from '../data/techs';
-import { UNITS, type UnitDef } from '../data/units';
+import { RESOURCE_BY_ID } from '../data/resources';
+import { UNIT_ORDER, UNITS, type UnitDef } from '../data/units';
 import { addYields, emptyYields, type Yields } from '../data/yields';
 import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/types';
 import { distance, neighbors, tilesInRadius } from './hex';
@@ -220,7 +221,13 @@ export function itemName(item: ProductionItem): string {
 export function cannotProduce(state: GameState, city: City, item: ProductionItem): string | null {
   if (item.kind === 'unit') {
     const def = UNITS[item.id];
-    if (!def) return 'Unidade desconhecida.';
+    if (!def || def.barbarianOnly) return 'Unidade desconhecida.';
+    if (def.requiresTech && !ownerTechs(state, city).includes(def.requiresTech)) {
+      return `Exige ${TECH_BY_ID[def.requiresTech]?.name ?? def.requiresTech}.`;
+    }
+    if (def.requiresResource && !ownsResource(state, city.owner, def.requiresResource)) {
+      return `Exige ${RESOURCE_BY_ID[def.requiresResource]?.name ?? def.requiresResource} no território.`;
+    }
     if (def.popCost && city.population <= def.popCost) return `Exige população ${def.popCost + 1}.`;
     return null;
   }
@@ -235,9 +242,15 @@ export function cannotProduce(state: GameState, city: City, item: ProductionItem
   return null;
 }
 
+/** O jogador tem o recurso (visível para ele) em algum hexágono do território? */
+export function ownsResource(state: GameState, playerId: number, resource: string): boolean {
+  const techs = state.players[playerId]?.techs ?? [];
+  return state.map.tiles.some((t) => t.owner === playerId && visibleResource(t, techs) === resource);
+}
+
 /** Itens listados no menu de produção (inclui bloqueados por população, para mostrar o motivo). */
 export function productionOptions(state: GameState, city: City): ProductionItem[] {
-  const units: ProductionItem[] = Object.keys(UNITS).map((id) => ({ kind: 'unit', id }));
+  const units: ProductionItem[] = UNIT_ORDER.filter((id) => UNITS[id]).map((id) => ({ kind: 'unit', id }));
   const buildings: ProductionItem[] = Object.values(BUILDINGS)
     .filter((b) => !b.auto && !city.buildings.includes(b.id))
     .filter((b) => (!b.needsRiver || hasFreshWater(state, city)) && (!b.needsCoast || isCoastalCity(state, city)))
@@ -299,7 +312,7 @@ export function completeItem(state: GameState, city: City, item: ProductionItem)
     const def = UNITS[item.id];
     const pos = spawnTile(state, city, def);
     if (pos === null) return null;
-    const u: Unit = { id: state.nextId++, type: def.id, owner: city.owner, pos, movesLeft: 0 };
+    const u: Unit = { id: state.nextId++, type: def.id, owner: city.owner, pos, movesLeft: 0, hp: 100, xp: 0, promotions: [] };
     if (def.charges) u.charges = def.charges + modifiersFor(state, city.owner).builderCharges;
     state.units.push(u);
     if (def.popCost) {
@@ -310,6 +323,7 @@ export function completeItem(state: GameState, city: City, item: ProductionItem)
     return { type: 'produced', cityId: city.id, item, unitId: u.id };
   }
   city.buildings.push(item.id);
+  if (item.id === 'walls') city.hp += 100; // muralhas chegam com a vida extra cheia
   assignCitizens(state, city);
   return { type: 'produced', cityId: city.id, item };
 }

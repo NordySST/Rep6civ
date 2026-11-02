@@ -61,8 +61,8 @@ describe('fundar cidade', () => {
 
   it('respeita distância mínima entre cidades', () => {
     const s = flatGame();
-    s.units.push({ id: 900, type: 'settler', owner: 0, pos: 5 * 12 + 5, movesLeft: 2 });
-    s.units.push({ id: 901, type: 'settler', owner: 0, pos: 5 * 12 + 7, movesLeft: 2 });
+    s.units.push({ id: 900, type: 'settler', owner: 0, pos: 5 * 12 + 5, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
+    s.units.push({ id: 901, type: 'settler', owner: 0, pos: 5 * 12 + 7, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     const r1 = applyAction(s, { type: 'foundCity', unitId: 900 });
     expect(r1.state.cities).toHaveLength(1);
     const u2 = r1.state.units.find((u) => u.id === 901)!;
@@ -73,7 +73,7 @@ describe('fundar cidade', () => {
   it('não funda na água nem em montanha', () => {
     const s = flatGame();
     s.map.tiles[30].terrain = 'mountain';
-    s.units.push({ id: 900, type: 'settler', owner: 0, pos: 30, movesLeft: 2 });
+    s.units.push({ id: 900, type: 'settler', owner: 0, pos: 30, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     expect(canFoundCity(s, s.units[0]).ok).toBe(false);
   });
 });
@@ -97,7 +97,7 @@ describe('movimento', () => {
 
   it('move ao longo do caminho e guarda o restante para o próximo turno', () => {
     const s = flatGame();
-    s.units.push({ id: 900, type: 'warrior', owner: 0, pos: 2 * 12 + 1, movesLeft: 2 });
+    s.units.push({ id: 900, type: 'warrior', owner: 0, pos: 2 * 12 + 1, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     const target = 2 * 12 + 7; // 6 hexágonos a leste
     const { state } = applyAction(s, { type: 'move', unitId: 900, target });
     const u = state.units[0];
@@ -115,7 +115,7 @@ describe('movimento', () => {
     const s = flatGame();
     for (let r = 0; r < 9; r++) s.map.tiles[r * 12 + 5].terrain = 'mountain';
     s.map.tiles[0 * 12 + 5].terrain = 'mountain';
-    s.units.push({ id: 900, type: 'warrior', owner: 0, pos: 4 * 12 + 2, movesLeft: 2 });
+    s.units.push({ id: 900, type: 'warrior', owner: 0, pos: 4 * 12 + 2, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     const res = findPath(s, s.units[0], 4 * 12 + 8)!;
     expect(res).not.toBeNull();
     for (const p of res.path) expect(isPassableLand(s.map.tiles[p])).toBe(true);
@@ -125,16 +125,16 @@ describe('movimento', () => {
 
   it('empilhamento: 1 militar + 1 civil por hexágono', () => {
     const s = flatGame();
-    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: 20, movesLeft: 2 });
-    s.units.push({ id: 2, type: 'warrior', owner: 0, pos: 21, movesLeft: 2 });
-    s.units.push({ id: 3, type: 'settler', owner: 0, pos: 22, movesLeft: 2 });
+    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: 20, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
+    s.units.push({ id: 2, type: 'warrior', owner: 0, pos: 21, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
+    s.units.push({ id: 3, type: 'settler', owner: 0, pos: 22, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     expect(canOccupy(s, s.units[1], 20)).toBe(false);
     expect(canOccupy(s, s.units[2], 20)).toBe(true);
   });
 
   it('fim de turno restaura movimentos e incrementa o turno', () => {
     const s = flatGame();
-    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: 20, movesLeft: 0, skipped: true });
+    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: 20, movesLeft: 0, skipped: true, hp: 100, xp: 0, promotions: [] });
     const { state } = applyAction(s, { type: 'endTurn' });
     expect(state.turn).toBe(s.turn + 1);
     expect(state.units[0].movesLeft).toBe(2);
@@ -146,7 +146,7 @@ describe('névoa de guerra', () => {
   it('visibilidade cobre o raio de visão e explora ao mover', () => {
     const s = flatGame(20, 14);
     s.players[0].explored = new Array(s.map.tiles.length).fill(0);
-    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: 7 * 20 + 3, movesLeft: 2 });
+    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: 7 * 20 + 3, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     const vis = computeVisibility(s, 0);
     expect(vis.reduce((a, b) => a + b, 0)).toBe(19);
     revealForPlayer(s, 0);
@@ -172,7 +172,7 @@ describe('névoa de guerra', () => {
     s.map.tiles[block].feature = 'forest';
     s.map.tiles[from].hills = true;
     expect(visibleFrom(s.map, from, 2)).toContain(behind);
-    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: from, movesLeft: 2 });
+    s.units.push({ id: 1, type: 'warrior', owner: 0, pos: from, movesLeft: 2, hp: 100, xp: 0, promotions: [] });
     expect(computeVisibility(s, 0).reduce((a, b) => a + b, 0)).toBe(37);
   });
 });
