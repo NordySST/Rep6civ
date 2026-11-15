@@ -13,6 +13,8 @@ npm test           # testes (Vitest)
 npm run typecheck  # tsc --noEmit
 npm run build      # typecheck + build de produção em dist/
 npm run preview    # serve dist/ (necessário para testar o service worker)
+npm run portraits  # regenera public/leaders/<civ>.webp (retratos) a partir da cena 3D dos líderes
+python3 scripts/convert-leaders.py <quaternius-stage>/models scripts/leaders.json  # refaz public/leaders/leaders.*
 node scripts/make-icons.mjs   # regenera os PNGs do PWA a partir de public/icons/icon.svg
 python3 scripts/convert-usda.py <quaternius-stage>/models scripts/models.json  # refaz public/models/pack.*
 npm run e2e:gestures   # com `npm run preview -- --port 4175` rodando: testa pinça/arrasto com toques reais (CDP)
@@ -59,12 +61,14 @@ src/
            world.ts (malhas: terreno em blocos, água, rios, árvores, cidades), models.ts
            (miniaturas low-poly das unidades, `Kit` de primitivas), structures.ts (melhorias,
            distritos, maravilhas, acampamentos), pack.ts (modelos importados) e renderer3d.ts
-           (câmera inclinada, toque por raio, unidades 3D, figuras em pé).
+           (câmera inclinada, toque por raio, unidades 3D, figuras em pé); leaders.ts (personagens
+           com esqueleto e poses) e leaderScene.ts (tela do líder e retratos).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos e trilha generativa WebAudio),
            tutorial.ts (dicas contextuais), fx.ts (efeitos visuais temporários por relógio),
-           icons.ts (ícones SVG próprios), techTree.ts (árvore em grafo).
+           icons.ts (ícones SVG próprios), techTree.ts (árvore em grafo), leaderScreen.ts (tela
+           do líder) e portrait.ts (retratos).
   ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
            as regras fecham a rodada; `proposeDeal` para propostas do humano), civAi.ts
            (pesquisa, governo, produção, colonos, construtores, militares), diplomacyAi.ts
@@ -574,6 +578,44 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   na paz.
 - Preferências: "Som" (efeitos), "Trilha sonora" e volumes de efeitos e música
   (`prefs.music`, `sfxVol`, `musicVol`).
+
+### Visual — Líderes (telas de diplomacia e retratos)
+
+- Modelos provisórios: personagens CC0 da Quaternius (UltimateAnimatedCharacter) recoloridos
+  por líder (`scripts/leaders.json`: `team`/`second` = cores da civilização, `tint`, `hide`,
+  `recolor`). `scripts/convert-leaders.py` grava malhas **indexadas com esqueleto**
+  (`public/leaders/leaders.{bin,json}`, vértice de 18 bytes com 4 articulações/pesos, matrizes
+  de repouso e inversas de ligação) — diferente do pack de unidades, as poses são feitas em
+  tempo real.
+- `render3d/leaders.ts`: `decodeLeaders`/`loadLeaders`, `buildRig` (`THREE.SkinnedMesh`, cores
+  da civilização assadas nos vértices), `solvePose` (pose descrita no espaço do personagem:
+  `aim` aponta um osso numa direção — x = esquerda dele, y = cima, z = frente —; `rot` gira em
+  graus) e `setPose` (interpolação esférica entre poses + camada aditiva de respiração/olhar).
+- `data/leaders.ts`: por civilização, cenário (`theme`: sala do trono, jardim do rio, salão
+  nórdico, tenda, iurta, varanda do porto, savana, templo em degraus, casa de madeira),
+  adereço de cabeça, capa, objeto na mão, `temper` (amplitude dos gestos), falas pt-BR
+  (saudação, amigável, hostil, guerra, aceitar, recusar, paz) e `glb` opcional.
+- `render3d/leaderScene.ts` (pedaço próprio, carregado sob demanda): `LeaderStage` — um único
+  contexto WebGL reaproveitado; cenário procedural (+ árvores/navios do pack), luz principal
+  com sombra, contorno e preenchimento, fogo que tremula, panos que balançam. Poses: parado
+  (neutro), mãos juntas (amigável), braços cruzados (hostil); gestos: acenar, abrir os braços
+  (feliz), punho e balançar a cabeça (zangado), apontar e erguer os punhos (guerra, com luz
+  vermelha e tremor da câmera). `frame(x, y)` desloca o enquadramento (diálogo embaixo no
+  celular em pé, à direita deitado). O laço para sozinho quando o canvas sai da página.
+- Líder próprio do Blender: `public/leaders/<id>.glb` + `glb: 'leaders/<id>.glb'` no
+  `LeaderDef`; material "Main" recebe a cor da civilização, animações
+  `idle`/`saudacao`/`raiva`/`feliz`/`guerra` (GLTFLoader, `AnimationMixer`). Sem o arquivo
+  ou com erro, usa o provisório.
+- Retratos: `npm run portraits` (Vite + Playwright com WebGL por software) renderiza o busto
+  na mesma cena e grava `public/leaders/<civ>.webp` (256 px). `ui/portrait.ts` (`portrait`)
+  os usa no Novo jogo, Diplomacia, Placar e Propostas.
+- UI (`ui/leaderScreen.ts`, `openModal(…, { size: 'leader' })`): tela cheia com o líder, placa
+  (título, civilização, situação e atitude), fala, "Por que essa atitude?" e as ações (paz,
+  fronteiras, amizade, negociar, presente, guerra). Propostas aceitas/recusadas e a guerra
+  mudam fala e gesto na hora. Sem WebGL2 mostra o retrato. Com um humano só, o primeiro
+  contato com uma civilização e a guerra declarada contra você abrem a tela do líder
+  (`leaderMoments`, depois da reprodução das jogadas e antes das propostas).
+- Testes: `tests/leaders.test.ts` (dados completos, decodificação, pose por direção).
 
 ## Plano das 8 etapas
 

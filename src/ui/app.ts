@@ -8,7 +8,7 @@ import { YIELD_KEYS, YIELD_LABELS } from '../data/yields';
 import { clampCamera, clampZoom, type Camera, zoomAt } from '../render/camera';
 import { nearCenter, Renderer, tileAtWorld, tileCenter, worldSize, type Overlay } from '../render/renderer';
 import type { MapView } from '../render/view';
-import { activeHumans, applyAction, nextHuman, unitsNeedingOrders, type Action, type ActionResult } from '../rules/actions';
+import { activeHumans, applyAction, nextHuman, unitsNeedingOrders, type Action, type ActionResult, type GameEvent } from '../rules/actions';
 import { playEndTurn, proposeDeal } from '../ai';
 import { unitStrength } from '../ai/common';
 import {
@@ -130,6 +130,10 @@ import type { City, CityFocus, GameState, ProductionItem, Unit } from '../state/
 import { clear, h } from './dom';
 import { attachInput } from './input';
 import { closeModal, newGameForm, openModal, slotList } from './menus';
+import { openLeaderScreen, type LeaderScreenHandle } from './leaderScreen';
+import type { LeaderGesture, LeaderMood } from '../render3d/leaderScene';
+import { portrait } from './portrait';
+import { LEADER_BY_CIV } from '../data/leaders';
 import { T } from './strings';
 
 const religionLabel = (id: string) => `${RELIGION_NAME_BY_ID[id]?.icon ?? ''} ${RELIGION_NAME_BY_ID[id]?.name ?? id}`;
@@ -622,6 +626,9 @@ export class App {
 
   private playback?: { until: number; plan: CamKey[] };
   private afterPlayback?: () => void;
+  /** Telas de líder a mostrar (primeiro contato, guerra declarada contra você). */
+  private leaderMoments: { pid: number; kind: 'meet' | 'war' }[] = [];
+  private endingTurn = false;
 
   private stepPlayback(now: number): void {
     const pb = this.playback;
@@ -684,6 +691,8 @@ export class App {
     }
     if (ok) {
       this.setState(state);
+      this.queueLeaderMoments(events, state);
+      if (this.leaderMoments.length && !this.endingTurn && !this.playback) setTimeout(() => this.flushLeaderMoments(), 0);
       const humans = activeHumans(state);
       this.deferMessages = deferAll;
       if (humans.length > 1) {
@@ -1206,7 +1215,10 @@ export class App {
       this.showHandoff();
       return;
     }
-    if (!this.dispatch({ type: 'endTurn' }) || !this.state) return;
+    this.endingTurn = true;
+    const ended = this.dispatch({ type: 'endTurn' });
+    this.endingTurn = false;
+    if (!ended || !this.state) return;
     this.autosave();
     if (activeHumans(this.state).length === 0) return this.showGameOver();
     if (activeHumans(this.state).length > 1) {
@@ -1226,7 +1238,10 @@ export class App {
         return this.showVictory();
       }
       if (this.state.turn >= 8) this.tip('victory');
-      if (this.state.proposals.some((p) => p.to === me.id)) this.showProposals();
+      const proposals = () => {
+        if (this.state?.proposals.some((p) => p.to === me.id)) this.showProposals();
+      };
+      if (!this.flushLeaderMoments(proposals)) proposals();
     };
     // passo a passo: a seleção e os diálogos esperam as jogadas dos rivais terminarem
     if (this.playback) {
@@ -1981,7 +1996,7 @@ export class App {
             buttons.push(h('button', { class: 'btn', onclick: () => this.proposal(pid, [{ type: 'openBorders' }]) }, '🚪 ' + T.proposeOpenBorders));
           if (!areFriends(s, me, pid))
             buttons.push(h('button', { class: 'btn', onclick: () => this.proposal(pid, [{ type: 'friendship' }]) }, '🤝 ' + T.proposeFriendship));
-          buttons.push(h('button', { class: 'btn primary', onclick: () => this.showNegotiation(pid) }, '📜 ' + T.negotiate));
+          buttons.push(h('button', { class: 'btn', onclick: () => this.showNegotiation(pid) }, '📜 ' + T.negotiate));
           buttons.push(
             h(
               'button',
@@ -2011,12 +2026,17 @@ export class App {
       return h(
         'div',
         { class: 'dip-card', style: `--civ:${civ?.color};--civ2:${civ?.secondaryColor}` },
-        h('div', { class: 'dip-head' }, h('span', { class: 'civ-swatch' }), h('div', {}, h('strong', {}, civ?.name ?? ''), h('small', {}, `${civ?.leaderTitle} ${civ?.leader}`))),
+        h(
+          'div',
+          { class: 'dip-head' },
+          h('button', { class: 'portrait-btn', 'aria-label': `${T.talkTo} ${civ?.leader ?? ''}`, onclick: () => this.showLeader(pid) }, portrait(p.civId, 'md')),
+          h('div', {}, h('strong', {}, civ?.name ?? ''), h('small', {}, `${civ?.leaderTitle} ${civ?.leader}`)),
+        ),
         h('small', {}, `${status}${agreements.length ? ' · ' + agreements.join(' · ') : ''}`),
         civ?.agenda ? h('small', { class: 'muted' }, `${T.agenda}: ${civ.agenda.name} — ${civ.agenda.description}`) : null,
         h('small', { class: total >= 20 ? 'good' : total <= -20 ? 'danger-text' : '' }, `${T.attitude}: ${attitudeLabel(total)} (${total >= 0 ? '+' : ''}${total})`),
         ...parts.map((pt) => h('small', { class: 'muted' }, `  ${pt.value >= 0 ? '+' : ''}${pt.value} ${pt.label}`)),
-        h('div', { class: 'actions' }, ...buttons),
+        h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => this.showLeader(pid) }, '🗣 ' + T.talkTo), ...buttons),
       );
     };
     const csCard = (pid: number) => {
@@ -2069,6 +2089,137 @@ export class App {
       ...css.map((p) => csCard(p.id)),
     );
     openModal(host, T.diplomacy, body);
+  }
+
+  /** Humor do líder `pid` em relação ao jogador atual (atitude da IA). */
+  private leaderMood(pid: number): { mood: LeaderMood; total: number; war: boolean } {
+    const s = this.state!;
+    const me = s.currentPlayer;
+    const total = opinionParts(s, pid, me, unitStrength).reduce((a, b) => a + b.value, 0);
+    const war = isAtWar(s, me, pid);
+    return { mood: war || total <= -20 ? 'hostile' : total >= 20 ? 'friendly' : 'neutral', total, war };
+  }
+
+  /**
+   * Tela do líder (diplomacia em tela cheia). `intro` substitui a saudação: primeiro
+   * contato, declaração de guerra recebida… `after` roda ao sair pelo botão principal.
+   */
+  private showLeader(pid: number, intro?: { gesture: LeaderGesture; line: string }, after?: () => void): void {
+    const s = this.state;
+    if (!s) return;
+    const p = s.players[pid];
+    const civ = CIV_BY_ID[p.civId];
+    const def = LEADER_BY_CIV[p.civId];
+    if (!civ || !def) return;
+    const me = s.currentPlayer;
+    const host = this.modalHost();
+    const subtitle = () => {
+      const st = this.state!;
+      const { total, war } = this.leaderMood(pid);
+      const r = peekRelation(st, me, pid);
+      const status = p.eliminated ? T.eliminatedTag : war ? `⚔ ${T.atWar} (${st.turn - (r?.since ?? st.turn)} t)` : `🕊 ${T.atPeace}`;
+      return `${status} · ${T.attitude}: ${attitudeLabel(total)} (${total >= 0 ? '+' : ''}${total})`;
+    };
+    const m = this.leaderMood(pid);
+    const greet = intro ?? {
+      gesture: (m.mood === 'hostile' ? 'angry' : 'greet') as LeaderGesture,
+      line: m.war ? def.lines.war : m.mood === 'friendly' ? def.lines.friendly : m.mood === 'hostile' ? def.lines.hostile : def.lines.greet,
+    };
+    let handle: LeaderScreenHandle | null = null;
+    const leave = () => {
+      this.renderHud();
+      if (after) after();
+      else this.showDiplomacy();
+    };
+    const propose = (items: DealItem[]) => {
+      const st = this.state!;
+      const res = proposeDeal(st, pid, items);
+      const rejected = res.events.some((e) => e.type === 'dealRejected');
+      if (rejected) {
+        play('error');
+        handle?.say(def.lines.reject, 'angry');
+        return;
+      }
+      if (!this.applyResult(res)) return;
+      this.renderHud();
+      const peace = items.some((i) => i.type === 'peace');
+      handle?.say(peace ? def.lines.peace : def.lines.accept, 'happy', this.leaderMood(pid).mood);
+      handle?.setActions(actions(), subtitle());
+    };
+    const actions = (): HTMLElement[] => {
+      const st = this.state!;
+      const r = peekRelation(st, me, pid)!;
+      const list: HTMLElement[] = [];
+      if (!p.eliminated) {
+        if (r.war) list.push(h('button', { class: 'btn primary', onclick: () => propose([{ type: 'peace' }]) }, '🕊 ' + T.proposePeace));
+        else {
+          if (!hasOpenBorders(st, me, pid)) list.push(h('button', { class: 'btn', onclick: () => propose([{ type: 'openBorders' }]) }, '🚪 ' + T.proposeOpenBorders));
+          if (!areFriends(st, me, pid)) list.push(h('button', { class: 'btn', onclick: () => propose([{ type: 'friendship' }]) }, '🤝 ' + T.proposeFriendship));
+          list.push(h('button', { class: 'btn', onclick: () => this.showNegotiation(pid) }, '📜 ' + T.negotiate));
+          list.push(h('button', { class: 'btn', disabled: st.players[me].gold < 50, onclick: () => propose([{ type: 'gold', from: me, amount: 50 }]) }, T.giftGold(50)));
+          const why = cannotDeclareWar(st, me, pid);
+          list.push(
+            h(
+              'button',
+              {
+                class: 'btn danger',
+                disabled: !!why,
+                title: why ?? '',
+                onclick: () => {
+                  if (!confirm(T.confirmWar(civ.name))) return;
+                  if (!this.dispatch({ type: 'declareWar', target: pid })) return;
+                  this.renderHud();
+                  handle?.say(def.lines.war, 'war', 'hostile');
+                  handle?.setActions(actions(), subtitle());
+                },
+              },
+              '⚔ ' + T.declareWar,
+            ),
+          );
+        }
+      }
+      list.push(h('button', { class: 'btn', onclick: leave }, after ? '✔ ' + T.continue : '◀ ' + T.back));
+      return list;
+    };
+    const parts = opinionParts(s, pid, me, unitStrength);
+    const details = h(
+      'details',
+      { class: 'leader-details' },
+      h('summary', {}, T.whyAttitude),
+      civ.agenda ? h('small', {}, `${T.agenda}: ${civ.agenda.name} — ${civ.agenda.description}`) : null,
+      ...parts.map((pt) => h('small', { class: 'muted' }, `${pt.value >= 0 ? '+' : ''}${pt.value} ${pt.label}`)),
+    );
+    handle = openLeaderScreen(host, civ.name, { civId: p.civId, subtitle: subtitle(), mood: m.mood, gesture: greet.gesture, line: greet.line, actions: actions(), details: [details] });
+  }
+
+  /** Encontros e declarações de guerra que abrem a tela do líder (só com um humano). */
+  private queueLeaderMoments(events: GameEvent[], state: GameState): void {
+    if (activeHumans(state).length !== 1) return;
+    const me = state.currentPlayer;
+    const civOk = (id: number) => {
+      const p = state.players[id];
+      return p && !p.isBarbarian && !p.isCityState && !p.isHuman && !!LEADER_BY_CIV[p.civId];
+    };
+    for (const ev of events) {
+      if (ev.type === 'firstContact' && (ev.a === me || ev.b === me)) {
+        const o = ev.a === me ? ev.b : ev.a;
+        if (civOk(o)) this.leaderMoments.push({ pid: o, kind: 'meet' });
+      } else if (ev.type === 'warDeclared' && ev.on === me && civOk(ev.by)) this.leaderMoments.push({ pid: ev.by, kind: 'war' });
+    }
+  }
+
+  /** Mostra os momentos pendentes um a um; depois, `then`. Devolve se mostrou algum. */
+  private flushLeaderMoments(then?: () => void): boolean {
+    const next = this.leaderMoments.shift();
+    if (!next || !this.state) return false;
+    const def = LEADER_BY_CIV[this.state.players[next.pid]?.civId];
+    if (!def) return this.flushLeaderMoments(then);
+    const intro = next.kind === 'war' ? { gesture: 'war' as LeaderGesture, line: def.lines.war } : { gesture: 'greet' as LeaderGesture, line: def.lines.greet };
+    this.showLeader(next.pid, intro, () => {
+      closeModal(this.modalHost());
+      if (!this.flushLeaderMoments(then)) then?.();
+    });
+    return true;
   }
 
   /** Negociação com uma civilização: luxos, ouro e acordo de pesquisa. */
@@ -2188,7 +2339,7 @@ export class App {
         h(
           'div',
           { class: 'dip-card' },
-          h('strong', {}, T.proposalFrom(playerName(s, p.from))),
+          h('div', { class: 'dip-head' }, portrait(s.players[p.from]?.civId ?? ''), h('strong', {}, T.proposalFrom(playerName(s, p.from)))),
           ...p.items.map((it) => h('small', {}, '• ' + desc(it))),
           h(
             'div',
@@ -2487,7 +2638,7 @@ export class App {
         h(
           'div',
           { class: 'dip-head' },
-          h('span', { class: 'civ-swatch' }),
+          portrait(s.players[pid].civId),
           h('div', {}, h('strong', {}, `${civ?.name}${pid === me ? ` (${T.you})` : ''}`), h('small', {}, `${playerEra(s, pid).name} · ${T.points}: ${sc.total}`)),
         ),
         h('small', {}, `⚔ ${VICTORY_LABELS.domination}: ${dom.held}/${dom.total} ${T.capitals}`),

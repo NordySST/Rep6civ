@@ -4,6 +4,7 @@ import { MAP_SIZES, type MapSizeId } from '../data/mapSizes';
 import { randomSeedString } from '../rules/rng';
 import { AUTOSAVE_SLOT, MANUAL_SLOTS, readSlotInfo, type SlotInfo } from '../state/save';
 import { CIV_BY_ID } from '../data/civs';
+import { portrait } from './portrait';
 import { clear, h } from './dom';
 import { T } from './strings';
 
@@ -16,13 +17,13 @@ export function closeModal(host: ModalHost): void {
   clear(host.root);
 }
 
-export function openModal(host: ModalHost, title: string, body: Node, opts: { closable?: boolean; size?: 'full' } = {}): void {
+export function openModal(host: ModalHost, title: string, body: Node, opts: { closable?: boolean; size?: 'full' | 'leader' } = {}): void {
   clear(host.root);
   const closable = opts.closable ?? true;
   host.root.dataset.closable = closable ? '1' : '0';
   const card = h(
     'div',
-    { class: `modal-card${opts.size === 'full' ? ' full' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+    { class: `modal-card${opts.size ? ' ' + opts.size : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h(
       'div',
       { class: 'modal-head' },
@@ -181,7 +182,7 @@ export function newGameForm(onStart: (c: NewGameChoice) => void, defaults?: Part
               renderCivs();
             },
           },
-          h('span', { class: 'civ-swatch' }),
+          portrait(c.id, 'md'),
           h(
             'span',
             { class: 'civ-text' },

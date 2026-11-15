@@ -1,0 +1,21 @@
+{
+  "_doc": "Líderes provisórios (personagens CC0 da Quaternius). team = cor da civilização; second = cor secundária; tint = cor original × cor da civilização; hide = materiais removidos; recolor em RGB linear.",
+  "valdoria": {"file": "UltimateAnimatedCharacter/SK_Witch.usda", "hide": ["Hat"], "team": ["Clothes"], "second": ["Gold"],
+    "recolor": {"Skin": [0.86, 0.6, 0.46], "Face": [0.03, 0.02, 0.02], "Hair": [0.06, 0.025, 0.012], "Belt": [0.35, 0.22, 0.04]}},
+  "tamaru": {"file": "UltimateAnimatedCharacter/SK_Wizard.usda", "team": ["Clothes", "Hat"], "second": ["Belt"],
+    "recolor": {"Skin": [0.16, 0.075, 0.035], "Face": [0.02, 0.01, 0.01], "Gold": [0.8, 0.55, 0.12]}},
+  "norvhal": {"file": "UltimateAnimatedCharacter/SK_VikingMale.usda", "team": ["Main"], "second": ["Light"],
+    "recolor": {"Skin": [0.88, 0.64, 0.52], "Face": [0.03, 0.02, 0.02], "Hair": [0.55, 0.5, 0.45], "Pants": [0.08, 0.06, 0.05]}},
+  "qasmira": {"file": "UltimateAnimatedCharacter/SK_NinjaSandFemale.usda", "team": ["Main"], "second": ["Details"],
+    "recolor": {"Skin": [0.5, 0.27, 0.14], "Face": [0.03, 0.02, 0.02], "Hair": [0.02, 0.012, 0.01], "Beige": [0.75, 0.62, 0.4]}},
+  "yrkaan": {"file": "UltimateAnimatedCharacter/SK_VikingFemale.usda", "team": ["Main"], "second": ["Light"],
+    "recolor": {"Skin": [0.62, 0.38, 0.22], "Face": [0.03, 0.02, 0.02], "Hair": [0.015, 0.012, 0.01], "Pants": [0.12, 0.07, 0.04]}},
+  "ilhavar": {"file": "UltimateAnimatedCharacter/SK_OldClassyFemale.usda", "team": ["Hat", "Pants"], "second": ["Shirt"],
+    "recolor": {"Skin": [0.86, 0.6, 0.46], "Face": [0.03, 0.02, 0.02], "Hair": [0.4, 0.2, 0.07], "Detail": [0.8, 0.6, 0.15], "Belt": [0.12, 0.07, 0.04]}},
+  "kaluun": {"file": "UltimateAnimatedCharacter/SK_KimonoFemale.usda", "team": ["Clothes"], "second": ["Band"],
+    "recolor": {"Skin": [0.14, 0.065, 0.03], "Face": [0.02, 0.01, 0.01], "Hair": [0.015, 0.01, 0.01]}},
+  "tzeltani": {"file": "UltimateAnimatedCharacter/SK_KimonoMale.usda", "team": ["Clothes"], "second": ["Band"],
+    "recolor": {"Skin": [0.38, 0.19, 0.09], "Face": [0.03, 0.02, 0.02]}},
+  "oskari": {"file": "UltimateAnimatedCharacter/SK_SuitMale.usda", "team": ["Black"], "second": ["Belt"],
+    "recolor": {"Skin": [0.9, 0.66, 0.54], "Face": [0.03, 0.02, 0.02], "Hair": [0.55, 0.42, 0.22], "Details": [0.75, 0.55, 0.12], "Shirt": [0.85, 0.85, 0.82]}}
+}
