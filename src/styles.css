@@ -746,3 +746,7 @@ html, body { font-family: var(--font-body); font-size: 16px; }
 @media (orientation: portrait) {
   .panel.city-mode { max-height: 34vh; }
 }
+/* volumes nas configurações */
+.vol { display: flex; align-items: center; gap: 10px; min-height: var(--tap); padding: 0 4px; }
+.vol span { flex: 0 0 auto; min-width: 9em; }
+.vol input[type='range'] { flex: 1; accent-color: var(--accent); height: 32px; }

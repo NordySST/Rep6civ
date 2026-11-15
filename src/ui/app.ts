@@ -2,6 +2,7 @@ import { CIV_BY_ID } from '../data/civs';
 import { FEATURE_REMOVAL, IMPROVEMENTS } from '../data/improvements';
 import { RESOURCE_BY_ID, RESOURCE_KIND_LABEL } from '../data/resources';
 import { UNITS } from '../data/units';
+import { TERRAINS } from '../data/terrains';
 import { WONDER_BY_ID } from '../data/wonders';
 import { YIELD_KEYS, YIELD_LABELS } from '../data/yields';
 import { clampCamera, clampZoom, type Camera, zoomAt } from '../render/camera';
@@ -62,7 +63,7 @@ import {
   VICTORY_LABELS,
 } from '../rules/victory';
 import { loadPrefs, savePrefs, applyPrefs, type Prefs } from './prefs';
-import { play, setSoundEnabled, unlockAudio, type Sfx } from './audio';
+import { play, setMusicContext, setMusicEnabled, setSoundEnabled, setVolumes, unlockAudio, type Sfx } from './audio';
 import { TIPS } from './tutorial';
 import { icon, richText } from './icons';
 import { cityAmenities, effectiveLuxuries, maintenanceOf, tradeableLuxuries } from '../rules/economy';
@@ -81,6 +82,14 @@ import {
 import { routesOf, routeYields, tradeCapacity, tradeDestinations } from '../rules/trade';
 import { distance, hexLine, neighbors } from '../rules/hex';
 import { Fx, moveDuration } from './fx';
+
+/** Som de deslocamento conforme a unidade (cavalaria, navio/embarcada, civil, militar). */
+function moveSound(type: string, onWater: boolean): Sfx {
+  const def = UNITS[type];
+  if (def?.domain === 'sea' || onWater) return 'oars';
+  if (def?.combat === 'cavalry') return 'hooves';
+  return def?.class === 'military' ? 'march' : 'move';
+}
 
 /** Ponto para onde a câmera vai durante a reprodução das jogadas dos rivais. */
 type CamKey = { at: number; x: number; y: number };
@@ -178,6 +187,8 @@ export class App {
     const bottom = h('div', { class: 'bottombar' }, this.el.panel, this.el.endTurn);
     applyPrefs(this.prefs);
     setSoundEnabled(this.prefs.sound);
+    setMusicEnabled(this.prefs.music);
+    setVolumes(this.prefs.sfxVol, this.prefs.musicVol);
     // áudio só pode começar após um gesto; cliques em botões fazem um "tique"
     root.addEventListener('pointerdown', () => unlockAudio(), { capture: true });
     root.addEventListener('click', (e) => {
@@ -342,6 +353,7 @@ export class App {
 
   private setState(s: GameState): void {
     this.state = s;
+    this.updateMusic();
     this.vis = computeVisibility(s, s.currentPlayer);
     this.refreshSelectionDerived();
     this.renderHud();
@@ -371,16 +383,99 @@ export class App {
         this.el.playback.hidden = false;
       }
     }
-    let sfx: Sfx | null = endTurn ? 'endTurn' : null;
-    for (const ev of events) {
-      if (ev.type === 'combat') {
-        if (ev.attackerOwner === s.currentPlayer || ev.defenderOwner === s.currentPlayer) sfx = 'combat';
-      } else if (ev.type === 'cityFounded') sfx = 'city';
-      else if (ev.type === 'firstContact' || ev.type === 'warDeclared' || ev.type === 'eraChanged' || ev.type === 'greatPerson') sfx = sfx ?? 'notify';
-      else if (ev.type === 'victory') sfx = 'victory';
-    }
-    if (sfx) play(sfx);
+    this.playEventSounds(events, viewer, endTurn);
     this.invalidate();
+  }
+
+  /** Sons dos eventos do ponto de vista de quem joga (sincronizados com as animações). */
+  private playEventSounds(events: ActionResult['events'], viewer: number, endTurn: boolean): void {
+    const s = this.state!;
+    if (viewer !== s.currentPlayer) return;
+    const me = viewer;
+    const seen = (i: number) => this.revealAll || !!this.vis[i];
+    let moved = false;
+    let n = 0;
+    const add = (x: Sfx, d = 0) => {
+      if (n++ < 8) play(x, d);
+    };
+    if (endTurn) add('endTurn');
+    for (const ev of events) {
+      switch (ev.type) {
+        case 'unitMoved': {
+          const u = s.units.find((x) => x.id === ev.unitId);
+          if (!endTurn && !moved && u && u.owner === me) {
+            moved = true;
+            add(moveSound(u.type, TERRAINS[s.map.tiles[u.pos].terrain].isWater));
+          }
+          break;
+        }
+        case 'combat': {
+          if (ev.attackerOwner !== me && ev.defenderOwner !== me && !seen(ev.pos)) break;
+          const def = UNITS[ev.attackerType];
+          const siege = ev.attackerType === 'city' || def?.combat === 'siege';
+          if (siege) add('boom', 0.35);
+          else if (def?.rangedStrength) {
+            add('bow');
+            add('clash', 0.3);
+          } else add('clash', 0.2);
+          if (ev.targetKilled || ev.attackerKilled) add('death', 0.5);
+          break;
+        }
+        case 'cityFounded':
+          add('city');
+          break;
+        case 'cityCaptured':
+          add('boom', 0.2);
+          if (ev.by === me) add('victory', 0.6);
+          break;
+        case 'produced': {
+          const c = s.cities.find((x) => x.id === ev.cityId);
+          if (c?.owner === me) add(ev.item.kind === 'wonder' ? 'wonder' : 'built', 0.3);
+          break;
+        }
+        case 'grew': {
+          const c = s.cities.find((x) => x.id === ev.cityId);
+          if (c?.owner === me) add('grow', 0.5);
+          break;
+        }
+        case 'techDone':
+          if (ev.playerId === me) add('tech', 0.6);
+          break;
+        case 'civicDone':
+          if (ev.playerId === me) add('civic', 0.8);
+          break;
+        case 'boost':
+          if (ev.playerId === me) add('boost', 0.2);
+          break;
+        case 'warDeclared':
+          if (ev.by === me || ev.on === me) add('war', 0.3);
+          break;
+        case 'peaceMade':
+          if (ev.a === me || ev.b === me) add('peace', 0.3);
+          break;
+        case 'firstContact':
+          if (ev.a === me || ev.b === me) add('contact', 0.4);
+          break;
+        case 'eraChanged':
+          if (ev.player === me) add('era', 1);
+          break;
+        case 'campCleared':
+          if (ev.by === me) add('gold', 0.3);
+          break;
+        case 'greatPerson':
+          if (ev.player === me) add('wonder', 0.6);
+          break;
+      }
+    }
+  }
+
+  /** Clima da trilha sonora: menu, paz ou guerra (contra uma civilização ou cidade-estado), pela era. */
+  private updateMusic(): void {
+    const s = this.state;
+    if (!s) return setMusicContext('menu');
+    const me = s.currentPlayer;
+    const war = s.players.some((p) => p.id !== me && !p.isBarbarian && !p.eliminated && peekRelation(s, me, p.id)?.war);
+    setMusicContext(war ? 'war' : 'peace', playerEra(s, me).index);
   }
 
   /**
@@ -1038,6 +1133,10 @@ export class App {
 
   private selectUnit(id: number | undefined, center = false): void {
     this.pendingAttack = undefined;
+    if (id !== undefined && id !== this.selectedUnitId && this.state) {
+      const u = this.state.units.find((x) => x.id === id);
+      if (u && u.owner === this.state.currentPlayer) play(UNITS[u.type]?.class === 'military' ? 'selectMil' : 'select');
+    }
     this.selectedUnitId = id;
     if (id !== undefined) {
       this.selectedCityId = undefined;
@@ -2110,6 +2209,8 @@ export class App {
   }
 
   private showGameOver(): void {
+    play('defeat');
+    setMusicContext('menu');
     const host = this.modalHost();
     openModal(
       host,
@@ -2349,7 +2450,8 @@ export class App {
     const w = s.winner!;
     const mine = w.player === s.currentPlayer;
     const host = this.modalHost();
-    play(mine ? 'victory' : 'error');
+    play(mine ? 'victory' : 'defeat');
+    if (mine) setMusicContext('triumph');
     openModal(
       host,
       mine ? T.victoryTitle : T.defeat,
@@ -2408,7 +2510,26 @@ export class App {
   private showSettings(): void {
     const host = this.modalHost();
     if (this.prefs.hq3d === undefined) this.prefs.hq3d = this.view.kind === '3d' ? (this.view as { quality?: string }).quality === 'high' : true;
-    const toggle = (label: string, key: 'sound' | 'tips' | 'animations' | 'largeText' | 'view3d' | 'hq3d' | 'watchAi') =>
+    const slider = (label: string, key: 'sfxVol' | 'musicVol') =>
+      h(
+        'label',
+        { class: 'vol' },
+        h('span', {}, label),
+        h('input', {
+          type: 'range',
+          min: 0,
+          max: 100,
+          value: Math.round(this.prefs[key] * 100),
+          'aria-label': label,
+          oninput: (e: Event) => {
+            this.prefs[key] = Number((e.target as HTMLInputElement).value) / 100;
+            setVolumes(this.prefs.sfxVol, this.prefs.musicVol);
+            savePrefs(this.prefs);
+          },
+          onchange: () => play('notify'),
+        }),
+      );
+    const toggle = (label: string, key: 'sound' | 'music' | 'tips' | 'animations' | 'largeText' | 'view3d' | 'hq3d' | 'watchAi') =>
       h(
         'button',
         {
@@ -2420,6 +2541,7 @@ export class App {
             savePrefs(this.prefs);
             applyPrefs(this.prefs);
             setSoundEnabled(this.prefs.sound);
+            setMusicEnabled(this.prefs.music);
             this.showSettings();
             if (key === 'view3d') void this.applyViewPref();
             if (key === 'hq3d') void this.applyViewPref(true);
@@ -2436,6 +2558,10 @@ export class App {
         'div',
         { class: 'menu-list' },
         toggle(T.prefSound, 'sound'),
+        slider(T.sfxVolume, 'sfxVol'),
+        toggle(T.prefMusic, 'music'),
+        slider(T.musicVolume, 'musicVol'),
+        h('small', { class: 'muted' }, T.musicHint),
         toggle(T.prefTips, 'tips'),
         toggle(T.prefAnimations, 'animations'),
         toggle(T.prefWatchAi, 'watchAi'),
@@ -2676,6 +2802,7 @@ export class App {
   }
 
   private showMainMenu(hasAutosave: boolean): void {
+    setMusicContext('menu');
     const host = this.modalHost();
     const body = h(
       'div',
