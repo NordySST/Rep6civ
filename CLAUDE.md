@@ -61,12 +61,14 @@ src/
            world.ts (malhas: terreno em blocos, água, rios, árvores, cidades), models.ts
            (miniaturas low-poly das unidades, `Kit` de primitivas), structures.ts (melhorias,
            distritos, maravilhas, acampamentos), pack.ts (modelos importados) e renderer3d.ts
-           (câmera inclinada, toque por raio, unidades 3D, figuras em pé).
+           (câmera inclinada, toque por raio, unidades 3D, figuras em pé); leaders.ts (personagens
+           com esqueleto e poses) e leaderScene.ts (tela do líder e retratos).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
            prefs.ts (preferências do aparelho), audio.ts (efeitos e trilha generativa WebAudio),
            tutorial.ts (dicas contextuais), fx.ts (efeitos visuais temporários por relógio),
-           icons.ts (ícones SVG próprios), techTree.ts (árvore em grafo).
+           icons.ts (ícones SVG próprios), techTree.ts (árvore em grafo), leaderScreen.ts (tela
+           do líder) e portrait.ts (retratos).
   ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
            as regras fecham a rodada; `proposeDeal` para propostas do humano), civAi.ts
            (pesquisa, governo, produção, colonos, construtores, militares), diplomacyAi.ts
