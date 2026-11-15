@@ -1,6 +1,11 @@
 /** Preferências do aparelho (localStorage), independentes do save. */
 export interface Prefs {
   sound: boolean;
+  /** Trilha sonora generativa. */
+  music: boolean;
+  /** Volumes (0–1) dos efeitos e da música. */
+  sfxVol: number;
+  musicVol: number;
   tips: boolean;
   animations: boolean;
   largeText: boolean;
@@ -24,7 +29,7 @@ function reducedMotion(): boolean {
 }
 
 export function loadPrefs(): Prefs {
-  const def: Prefs = { sound: true, tips: true, animations: !reducedMotion(), largeText: false, view3d: true, seenTips: [] };
+  const def: Prefs = { sound: true, music: true, sfxVol: 0.8, musicVol: 0.5, tips: true, animations: !reducedMotion(), largeText: false, view3d: true, seenTips: [] };
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return { ...def, ...JSON.parse(raw) };

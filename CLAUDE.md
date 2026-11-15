@@ -62,7 +62,7 @@ src/
            (câmera inclinada, toque por raio, unidades 3D, figuras em pé).
   ui/      DOM/HUD: app.ts (controlador), input.ts (toque/pinça/arrastar/roda),
            menus.ts (novo jogo, salvar/carregar), strings.ts (todos os textos pt-BR), dom.ts,
-           prefs.ts (preferências do aparelho), audio.ts (efeitos WebAudio sintetizados),
+           prefs.ts (preferências do aparelho), audio.ts (efeitos e trilha generativa WebAudio),
            tutorial.ts (dicas contextuais), fx.ts (efeitos visuais temporários por relógio),
            icons.ts (ícones SVG próprios), techTree.ts (árvore em grafo).
   ai/      IA de civilizações e cidades-estado: index.ts (`playEndTurn`: cada IA joga e depois
@@ -553,6 +553,27 @@ tests/     Vitest para as regras (hex, rng, mapgen, jogo/movimento/névoa, save,
   colono (fazendeiro) e mercador (senhor de cartola) com a carroça. Catapulta (com dois
   operadores) e encouraçado ganharam modelos procedurais detalhados. `soldier()` aceita outro
   corpo (`bodyName`) e usa a mão disponível (`Palm`/`Fist`/`Hand`).
+
+### Som e trilha sonora
+
+- `ui/audio.ts`, tudo sintetizado com WebAudio (sem arquivos; offline). Mixador com
+  barramentos de efeitos, música e ambiente (volumes próprios), reverberação compartilhada
+  (impulso gerado) e compressor. O contexto nasce no primeiro gesto (`unlockAudio`) e é
+  suspenso com a aba oculta.
+- Efeitos (`play(sfx, atraso)`, ~30): seleção (civil/militar), passos, marcha, cascos,
+  remos, choque de metal, arco, pedra/explosão, queda, cidade (sinos), produção (bigorna),
+  maravilha (coro), pesquisa, cívica, eureca, guerra (taiko + trompa), paz, contato, era
+  (fanfarra), ouro, promoção, vitória/derrota, aviso, erro. `App.playEventSounds` traduz os
+  eventos do ponto de vista de quem joga, com atrasos casados com as animações de combate.
+- Trilha generativa (`setMusicContext(clima, era)`): menu, paz, guerra e triunfo; por era
+  mudam modo (dórico, mixolídio, eólio, frígio na guerra…), andamento e instrumentos (pads,
+  harpa/lira, flauta, sinos, metais, zumbido, tambores de moldura/taiko). Progressões de
+  acordes por seção, motivo melódico repetido e variado (AABA) e um compasso de respiro a
+  cada 16. Troca de clima na virada do compasso. `App.updateMusic` escolhe guerra quando o
+  jogador está em guerra com uma civilização ou cidade-estado. Ambiente: vento e pássaros
+  na paz.
+- Preferências: "Som" (efeitos), "Trilha sonora" e volumes de efeitos e música
+  (`prefs.music`, `sfxVol`, `musicVol`).
 
 ## Plano das 8 etapas
 
