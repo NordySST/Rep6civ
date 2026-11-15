@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head><meta charset="utf-8" /><title>Retratos dos líderes</title></head>
+  <body style="margin: 0; background: #000">
+    <!-- Usado por scripts/render-portraits.mjs (servidor de desenvolvimento do Vite). -->
+    <script type="module">
+      import { loadLeaders } from '/src/render3d/leaders.ts';
+      import { loadPack } from '/src/render3d/pack.ts';
+      import { LeaderStage } from '/src/render3d/leaderScene.ts';
+      import { LEADERS } from '/src/data/leaders.ts';
+      await Promise.all([loadLeaders('/leaders/'), loadPack('/models/')]);
+      const stage = new LeaderStage();
+      document.body.append(stage.canvas);
+      const size = Number(new URLSearchParams(location.search).get('size') || 256);
+      const out = {};
+      for (const l of LEADERS) out[l.civId] = await stage.portrait(l.civId, size);
+      window.portraits = out;
+    </script>
+  </body>
+</html>
